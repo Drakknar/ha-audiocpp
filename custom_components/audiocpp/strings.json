@@ -1,0 +1,140 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This audio.cpp server is already configured.",
+      "reconfigure_successful": "The server was updated."
+    },
+    "error": {
+      "cannot_connect": "Could not reach the server. Check the URL and that audiocpp_server is running and listening on a reachable address (not 127.0.0.1 if Home Assistant runs elsewhere).",
+      "invalid_auth": "The server refused the API key.",
+      "invalid_url": "Enter an http:// or https:// URL without a username or password, for example http://192.168.1.10:8080. Put a proxy token in the API key field.",
+      "not_audiocpp": "Something answered at this URL, but it is not an audio.cpp server reporting status ok."
+    },
+    "step": {
+      "user": {
+        "title": "Add an audio.cpp server",
+        "description": "Enter the address of an audiocpp_server. TTS and STT engines are added afterwards from the server's entry.",
+        "data": {
+          "url": "Server URL",
+          "api_key": "API key (optional)"
+        },
+        "data_description": {
+          "url": "Base URL of the server, for example http://192.168.1.10:8080.",
+          "api_key": "audio.cpp has no authentication of its own. Only set this if a reverse proxy in front of it expects a Bearer token."
+        }
+      },
+      "reconfigure": {
+        "title": "Change the audio.cpp server",
+        "data": {
+          "url": "Server URL",
+          "api_key": "API key (optional)"
+        },
+        "data_description": {
+          "url": "Base URL of the server, for example http://192.168.1.10:8080.",
+          "api_key": "Leave empty to keep the current key. audio.cpp has no authentication of its own; this is only for a reverse proxy that expects a Bearer token."
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "tts": {
+      "entry_type": "TTS engine",
+      "initiate_flow": {
+        "user": "Add TTS engine",
+        "reconfigure": "Reconfigure TTS engine"
+      },
+      "abort": {
+        "entry_not_loaded": "The audio.cpp server is not loaded. Check that it is reachable, then try again.",
+        "reconfigure_successful": "The engine was updated."
+      },
+      "error": {
+        "cannot_list_models": "Could not list the server's models. You can still type a model id.",
+        "no_models": "The server has no TTS models configured. You can still type a model id.",
+        "invalid_languages": "Enter at least one language tag, such as en or it-IT.",
+        "invalid_extra_options": "Extra request options must be a mapping of keys to values.",
+        "probe_failed": "A test synthesis failed: {error}"
+      },
+      "step": {
+        "model": {
+          "title": "Choose a TTS model",
+          "description": "Models the server runs in streaming mode can use the streaming endpoint.",
+          "data": {
+            "model": "Model"
+          }
+        },
+        "settings": {
+          "title": "TTS engine settings",
+          "description": "Settings for {model}. Saving runs a short test synthesis, which can take a while if the server has to load the model first.",
+          "data": {
+            "name": "Name",
+            "languages": "Languages",
+            "voice": "Voice",
+            "streaming": "Use the streaming endpoint",
+            "split_sentences": "Synthesize sentence by sentence",
+            "speed": "Speed",
+            "extra_options": "Extra request options"
+          },
+          "data_description": {
+            "languages": "Languages this engine offers to Home Assistant. The first is the default. audio.cpp does not report what a model speaks, so pick what your model and voice actually support.",
+            "voice": "A voice id or a voice preset from the server config. Leave empty to use the model's default_voice_preset.",
+            "streaming": "Receive audio as it is generated (SSE PCM). Only offered for models the server runs with mode streaming.",
+            "split_sentences": "Start speaking after the first sentence instead of waiting for the whole reply. Turn off if the model sounds better with the full text.",
+            "speed": "Speech rate multiplier. Leave empty unless the model supports speed control; models without it reject the request.",
+            "extra_options": "Extra fields merged into every speech request, for example seed, max_tokens or an options object. model, input and the format fields are set by the integration."
+          }
+        }
+      }
+    },
+    "stt": {
+      "entry_type": "STT engine",
+      "initiate_flow": {
+        "user": "Add STT engine",
+        "reconfigure": "Reconfigure STT engine"
+      },
+      "abort": {
+        "entry_not_loaded": "The audio.cpp server is not loaded. Check that it is reachable, then try again.",
+        "reconfigure_successful": "The engine was updated."
+      },
+      "error": {
+        "cannot_list_models": "Could not list the server's models. You can still type a model id.",
+        "no_models": "The server has no ASR models configured. You can still type a model id.",
+        "invalid_languages": "Enter at least one language tag, such as en or it-IT."
+      },
+      "step": {
+        "model": {
+          "title": "Choose an ASR model",
+          "description": "Models the server runs in streaming mode can transcribe while you speak.",
+          "data": {
+            "model": "Model"
+          }
+        },
+        "settings": {
+          "title": "STT engine settings",
+          "description": "Settings for {model}.",
+          "data": {
+            "name": "Name",
+            "languages": "Languages",
+            "streaming": "Use the live streaming endpoint",
+            "language_hint": "Language sent to the model",
+            "prompt": "Recognition prompt"
+          },
+          "data_description": {
+            "languages": "Languages this engine offers to Home Assistant.",
+            "streaming": "Send audio while it is captured (/v1/audio/transcriptions/live), so the model decodes as you speak. Off uploads the whole recording when you stop. Only offered for models the server runs with mode streaming.",
+            "language_hint": "Whether to pass the conversation language to the model. Some models take none and reject the field.",
+            "prompt": "Optional context such as names or hotwords, for models that support it."
+          }
+        }
+      }
+    }
+  },
+  "selector": {
+    "language_hint": {
+      "options": {
+        "none": "Do not send a language",
+        "code": "Language code (en)",
+        "full": "Full tag (en-US)"
+      }
+    }
+  }
+}
