@@ -110,9 +110,8 @@ Verified against the source of the 2026.9.4 tag and by running the tests.
   - **Real-server check:** passed through HA's TTS manager against the real OmniVoice server, for en and it, in default mp3, mp3, flac, and streamed-message modes.
   - **Test gotcha:** the harness's `testing_config/tts` file cache is shared across tests and runs. Turn it off with `hass.data[DATA_TTS_MANAGER].use_file_cache = False`, or stale clips get served.
 - **Lint:** ruff (E,F,W,B,UP,SIM,ASYNC) is clean apart from one stylistic SIM105 note in `api.py`.
+- **Real use (2026-10-10):** installed in the author's Home Assistant (2026.10.0) and tested by the author against their real `audiocpp_server`.
 - **Not yet done:**
-  - Testing against a real `audiocpp_server`.
-  - Installing into the author's Home Assistant.
   - Checking the real sample rate of Pocket TTS (the probe detects it).
   - Checking whether Nemotron live needs a language hint.
 
@@ -132,7 +131,7 @@ Verified against the source of the 2026.9.4 tag and by running the tests.
   - `nemotron-stream`: asr, streaming.
 
   The author's HA was 2026.9.4 at the time.
-- **OmniVoice variant:** `server.omnivoice.json`. Not yet run on the server.
+- **OmniVoice variant:** `server.omnivoice.json`. Not yet run on the server (as of 2026-10-05).
   - One `omnivoice` entry (task `tts`, mode `streaming`) holds both KITT presets, plus `nemotron-stream`.
   - **Language:** OmniVoice auto-detects it when the request omits `language`, so one entry serves both English and Italian.
   - **Pseudo-streaming:** it emits one SSE delta per text chunk only when `text_chunk_size` is set, so `default_request_options` sets it to 160.
