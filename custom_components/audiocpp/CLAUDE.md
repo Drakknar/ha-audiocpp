@@ -111,9 +111,6 @@ Verified against the source of the 2026.9.4 tag and by running the tests.
   - **Test gotcha:** the harness's `testing_config/tts` file cache is shared across tests and runs. Turn it off with `hass.data[DATA_TTS_MANAGER].use_file_cache = False`, or stale clips get served.
 - **Lint:** ruff (E,F,W,B,UP,SIM,ASYNC) is clean apart from one stylistic SIM105 note in `api.py`.
 - **Real use (2026-10-10):** installed in the author's Home Assistant (2026.10.0) and tested by the author against their real `audiocpp_server`.
-- **Not yet done:**
-  - Checking the real sample rate of Pocket TTS (the probe detects it).
-  - Checking whether Nemotron live needs a language hint.
 
 ## Chatterbox notes (2026-10-05)
 
