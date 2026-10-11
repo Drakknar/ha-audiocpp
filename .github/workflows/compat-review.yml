@@ -1,0 +1,187 @@
+name: Compatibility review
+
+# Daily check for new versions of what this repository depends on:
+# Home Assistant core and the audio.cpp server.
+# Each new version is reviewed once by Claude: a fix comes as a pull request,
+# anything that needs you as an issue, and new features worth using as an
+# "enhancement" issue. What has been reviewed is kept on the watch-state branch.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Review the latest versions even if already reviewed
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compat-review
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # first-run baselines go to the watch-state branch
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+      keys: ${{ steps.detect.outputs.keys }}
+      subject: ${{ steps.detect.outputs.subject }}
+      context: ${{ steps.detect.outputs.context }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find new versions
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || 'false' }}
+        run: |
+          set -euo pipefail
+          w() { bash .github/scripts/watch.sh "$@"; }
+          due() { [ "$FORCE" = true ] || [ "$(w should-run "$1")" = true ]; }
+          ctx=$RUNNER_TEMP/watch-context.md
+          : > "$ctx"
+          keys=()
+          subjects=()
+
+          # Home Assistant: one review per minor release, starting with its first
+          # beta, so a breaking change shows up before the release reaches you.
+          tags=$(gh api "repos/home-assistant/core/releases?per_page=50" --jq '.[].tag_name' \
+            | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+(b[0-9]+)?$')
+          minor=$(sort -V <<<"$tags" | tail -n1 | cut -d. -f1,2)
+          tag=$(grep "^$minor\." <<<"$tags" | grep -v b | sort -V | tail -n1 || true)
+          [ -n "$tag" ] || tag=$(grep "^$minor\." <<<"$tags" | sort -V | tail -n1)
+          if due "ha:$minor"; then
+            prev=$(w get ha:last)
+            prev=${prev:-$(jq -r .homeassistant hacs.json)}
+            keys+=("ha:$minor=@" "ha:last=$tag")
+            subjects+=("Home Assistant $tag")
+            beta=""
+            case "$tag" in *b*) beta=" This is a beta; the final release follows about a week later." ;; esac
+            cat >> "$ctx" <<CTX
+          ## Home Assistant core
+          - Last reviewed: $prev. New: $tag.$beta
+          - Source: https://github.com/home-assistant/core/compare/$prev...$tag
+          - Frontend version each release ships: homeassistant/components/frontend/manifest.json at that tag.
+
+          CTX
+          fi
+
+          rel=$(gh api repos/0xShug0/audio.cpp/releases/latest --jq .tag_name)
+          if due "audiocpp:$rel"; then
+            prev=$(w get audiocpp:last)
+            prev=${prev:-c6b104e}
+            keys+=("audiocpp:$rel=@" "audiocpp:last=$rel")
+            subjects+=("audio.cpp $rel")
+            cat >> "$ctx" <<CTX
+          ## audio.cpp server
+          - Last reviewed: $prev. New: $rel.
+          - Release: https://github.com/0xShug0/audio.cpp/releases/tag/$rel
+          - Source: https://github.com/0xShug0/audio.cpp/compare/$prev...$rel
+
+          CTX
+          fi
+
+          if [ ${#keys[@]} -eq 0 ]; then
+            echo "Nothing new to review."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          subject=$(printf '%s, ' "${subjects[@]}")
+          subject=${subject%, }
+          echo "Reviewing: $subject"
+          {
+            echo "run=true"
+            echo "keys=${keys[*]}"
+            echo "subject=$subject"
+            echo "context<<CTX_EOF"
+            echo "# Review: $subject"
+            echo
+            cat "$ctx"
+            echo "CTX_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  review:
+    needs: detect
+    if: needs.detect.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Write context
+        env:
+          CONTEXT: ${{ needs.detect.outputs.context }}
+        run: printf '%s\n' "$CONTEXT" > "$RUNNER_TEMP/watch-context.md"
+
+      - name: Claude
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: >-
+            Follow the instructions in .github/prompts/ha-compat.md.
+            The facts for this run are in ${{ runner.temp }}/watch-context.md.
+          claude_args: >-
+            --model opus
+            --max-turns 120
+            --allowedTools "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch,TodoWrite"
+            --json-schema '{"type":"object","properties":{"status":{"type":"string","enum":["clear","fixed","needs_attention","transient"]},"title":{"type":"string"},"report":{"type":"string"},"improvements":{"type":"string"}},"required":["status","title","report","improvements"]}'
+
+      # Only the verdict and a diff of the working tree leave this job. The
+      # report job, which can write, turns them into a pull request or issues.
+      - name: Collect result
+        if: always()
+        env:
+          VERDICT: ${{ steps.claude.outputs.structured_output }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/watch"
+          printf '%s' "$VERDICT" > "$RUNNER_TEMP/watch/verdict.json"
+          git add -A
+          git diff --cached --binary "$GITHUB_SHA" -- . ':(exclude).github' > "$RUNNER_TEMP/watch/changes.patch"
+          git diff --cached --stat "$GITHUB_SHA" -- . ':(exclude).github'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: watch
+          path: ${{ runner.temp }}/watch/
+          retention-days: 14
+
+  report:
+    needs: [detect, review]
+    if: always() && needs.review.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: watch
+          path: ${{ runner.temp }}/watch
+
+      - name: Open pull request / issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WATCH_KEYS: ${{ needs.detect.outputs.keys }}
+          WATCH_SUBJECT: ${{ needs.detect.outputs.subject }}
+          WATCH_BRANCH: claude/compat-${{ github.run_number }}
+        run: bash .github/scripts/watch.sh report "$RUNNER_TEMP/watch"
