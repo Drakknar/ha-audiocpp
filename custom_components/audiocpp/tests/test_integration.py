@@ -142,6 +142,8 @@ async def test_reconfigure_keeps_api_key(hass: HomeAssistant, fake) -> None:
     assert "proxy-token" not in str(result["data_schema"].schema)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"url": url})
     assert result["reason"] == "reconfigure_successful"
+    # Our strings.json wording, not the homeassistant domain's (HA 2026.10+).
+    assert "translation_domain" not in result
     assert entry.data["api_key"] == "proxy-token"
 
 
@@ -262,6 +264,7 @@ async def test_stt_live_and_file(hass: HomeAssistant, fake) -> None:
         result["flow_id"], {"name": "Parakeet", "languages": ["en"], "language_hint": "code"}
     )
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
+    assert "translation_domain" not in result
     await hass.async_block_till_done()
     entity = _entity(hass, stt.DATA_COMPONENT, "stt", sub.subentry_id)
     result = await entity.async_process_audio_stream(metadata, mic())

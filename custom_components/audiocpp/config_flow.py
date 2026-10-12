@@ -162,11 +162,14 @@ class AudioCppConfigFlow(ConfigFlow, domain=DOMAIN):
             if not errors:
                 if data[CONF_URL] != entry.data[CONF_URL]:
                     self._async_abort_entries_match({CONF_URL: data[CONF_URL]})
-                # The entry's update listener reloads it.
+                # The entry's update listener reloads it. An explicit reason
+                # keeps our own wording; since HA 2026.10 the default one is
+                # translated by the homeassistant domain instead.
                 return self.async_update_and_abort(
                     entry,
                     title=_title(data[CONF_URL]),
                     data=data,
+                    reason="reconfigure_successful",
                 )
         return self.async_show_form(
             step_id="reconfigure",
@@ -300,9 +303,13 @@ class _EngineSubentryFlow(ConfigSubentryFlow):
         title = data.pop(CONF_NAME)
         if self.source == "user":
             return self.async_create_entry(title=title, data=data)
-        return self.async_update_and_abort(
+        # What async_update_and_abort does, but with our own wording: since
+        # HA 2026.10 its default reason is translated by the homeassistant
+        # domain, and its ``reason`` argument does not exist before 2026.10.
+        self.hass.config_entries.async_update_subentry(
             self._get_entry(), self._get_reconfigure_subentry(), title=title, data=data
         )
+        return self.async_abort(reason="reconfigure_successful")
 
 
 class TTSSubentryFlow(_EngineSubentryFlow):
