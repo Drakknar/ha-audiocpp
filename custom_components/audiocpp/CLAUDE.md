@@ -40,10 +40,11 @@ Home Assistant ignores `CLAUDE.md`, `pytest.ini` and `tests/` when the folder is
 
 ## Findings: audio.cpp server API
 
-These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `app/server/README.md` and `app/server/runtime.cpp`.
+These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `app/server/README.md` and `app/server/runtime.cpp`. Rechecked against `v0.9.1` (2026-10-12): none of the items below changed.
 
 - **`GET /health`:** returns `{"status":"ok","backend":..,"models":N,...}`.
 - **`GET /v1/models`:** returns `{"data":[{id, family, task, mode, loaded, path}]}`.
+  - Since v0.9.1, `?include_params=true` adds `params`: the request options the model's spec declares (`name`, `type`, `required`, `description`, `default`/`min`/`max`, enum `values`). Not used yet.
   - `task` is a token: `tts` and `asr` are the two used here; others include `vad`, `align`, `diar` and `clone`.
   - `mode` is `offline` or `streaming`.
 - **`GET /v1/audio/voices?model=`:** returns `{"voices":[...]}`, which includes the preset names from `server.json` and the `voice_dir` voices.
@@ -57,7 +58,7 @@ These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `ap
     - The stream does not report the sample rate or channel count. This is why the TTS flow probes.
     - `stream_format: audio` gives raw chunked PCM instead (not used).
   - **Non-streaming on a streaming model:** works. The server runs the streaming path and returns the full WAV, and the probe relies on this.
-  - **Speed:** `speed`/`speaking_rate` is accepted only by models with speed control; other models reject it.
+  - **Speed:** `speed`/`speaking_rate` is accepted only by models with speed control; other models reject it. Since v0.9.1, `speed: 1` is accepted as omitted by models without speed control, and an explicit value (including 1) overrides the server's configured request defaults. Clone and voice-design models now get speed support too when their spec declares it.
   - **Voice resolution order:** `voice_ref` > a preset matching `voice` > a `voice_dir` wav > the model-native voice id. When `voice` is omitted, `default_voice_preset` is injected.
   - **VoxCPM2 streaming:** requires `options.retry_badcase=false`. The flow suggests this through `extra_options`.
 - **`POST /v1/audio/transcriptions`:**
@@ -77,7 +78,7 @@ These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `ap
 
 ## Findings: Home Assistant APIs
 
-Verified against the source of the 2026.9.4 tag and by running the tests.
+Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running the tests on both.
 
 - **TTS streaming input:** `TextToSpeechEntity.async_supports_streaming_input()` is true when `async_stream_tts_audio` is overridden. Assist then streams LLM text through `TTSAudioRequest.message_gen`.
   - The entity returns `TTSAudioResponse("wav", data_gen)`.
@@ -85,8 +86,12 @@ Verified against the source of the 2026.9.4 tag and by running the tests.
 - **Streamed WAV:** the header has 0 frames, the same convention as `wyoming/tts.py`. ffmpeg reads to the end of the data.
 - **STT input:** `async_process_audio_stream` receives raw PCM even when `metadata.format` is WAV, so the non-streaming path adds the header itself. Assist sends 16 kHz, 16-bit mono, and that is all the entity declares.
 - **Subentry reloads:** adding, updating or removing a subentry fires the entry's update listeners, which reload the entry.
-  - Because of this, the flows use `async_update_and_abort`.
+  - Because of this, the flows update and abort without reloading (`async_update_and_abort`, or its equivalent by hand in the subentry flows; see below).
   - `async_update_reload_and_abort` with an update listener logs a deprecation warning that becomes breaking in 2026.12.
+- **Abort wording (2026.10):** `async_update_and_abort` without `reason` now aborts with `translation_domain="homeassistant"`, so HA's generic "reconfigure successful" text replaces ours ([#180723](https://github.com/home-assistant/core/pull/180723), [#181225](https://github.com/home-assistant/core/pull/181225)).
+  - The server flow passes `reason="reconfigure_successful"` explicitly, which keeps `strings.json`.
+  - The subentry `async_update_and_abort` only gained `reason` in 2026.10, so the subentry flows call `async_update_subentry` and `async_abort` themselves to stay compatible with 2026.9.
+- **Voluptuous:** since 2026.9, HA aliases `voluptuous` to probatio (`homeassistant/__init__.py`), and 2026.10 bans it in core. `import voluptuous as vol` still works for custom integrations, with no warning.
 - **`LanguageSelector`:** single choice only. Languages therefore use `SelectSelector(multiple=True, custom_value=True)`, validated with a BCP-47-like regex.
 - **References:** `homeassistant/components/openai_conversation` (`stt.py`, `tts.py`, `config_flow.py`) is the closest in-tree example of TTS/STT subentries.
 
@@ -96,12 +101,12 @@ Verified against the source of the 2026.9.4 tag and by running the tests.
 - **Sentence splitting:** on by default, in both modes. A sentence ends at terminal punctuation followed by whitespace, at CJK punctuation, or at a blank line. Fragments under 20 characters are merged into the next sentence. Without streaming, each sentence's WAV must have the same format as the first, or the request raises an error.
 - **Reserved request fields:** `extra_options` cannot override `model`, `input`, `stream`, `stream_format` or `response_format`.
 - **Language hint:** the default `language_hint` is `none`, because some models reject a `language` field. The audio.cpp docs show `en` for multipart and `en-US` for Nemotron live.
-- **Minimum version:** set to 2026.9.0 because that is the only version verified. Older versions with subentries and TTS streaming may work, but this is untested.
+- **Minimum version:** set to 2026.9.0, the oldest version verified (2026.9.4 and 2026.10.1 are tested). Older versions with subentries and TTS streaming may work, but this is untested.
 - **SSE parsing:** done by hand rather than with `readline`, because a base64 audio line can exceed aiohttp's line-length limit.
 
 ## Verification status
 
-- **Automated tests:** `pytest` gives 6 passed, against HA 2026.9.4 on Python 3.14. The tests use a fake server that follows the documented wire format, including full-duplex live STT.
+- **Automated tests:** `pytest` gives 7 passed against HA 2026.9.4 and 2026.10.1 on Python 3.14 (2026-10-12; `test_tts_through_home_assistant` needs an `ffmpeg` binary on PATH and is skipped without one). The tests use a fake server that follows the documented wire format, including full-duplex live STT.
 - **Code review (2026-10-05):** found 2 issues, both fixed and covered by tests. (1) Reconfiguring the server with a blank API key dropped the stored key; a blank key now keeps it. (2) Credentials in the URL leaked into the entry title and logs; `normalize_url` now rejects them.
 - **Bug found in real use (2026-10-05): "TTS engine name is not set".**
   - **Cause:** the entity used `has_entity_name=True` with `_attr_name=None`, so `entity.name` was None, and HA's TTS manager refuses such an engine. Every `tts.speak` failed, and Assist played no audio.
@@ -145,8 +150,8 @@ Verified against the source of the 2026.9.4 tag and by running the tests.
 ## Running the tests
 
 ```bash
-# Python 3.14 is needed for HA 2026.9.x
-pip install homeassistant==2026.9.4 pytest-homeassistant-custom-component mutagen ha-ffmpeg
+# Python 3.14 is needed for HA 2026.9.x and 2026.10.x
+pip install homeassistant==2026.10.1 pytest-homeassistant-custom-component==0.13.372 mutagen ha-ffmpeg
 cd custom_components/audiocpp && pytest
 ```
 
