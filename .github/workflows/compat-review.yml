@@ -2,9 +2,10 @@ name: Compatibility review
 
 # Daily check for new versions of what this repository depends on:
 # Home Assistant core and the audio.cpp server.
-# Each new version is reviewed once by Claude: a fix comes as a pull request,
-# anything that needs you as an issue, and new features worth using as an
-# "enhancement" issue. What has been reviewed is kept on the watch-state branch.
+# Each new version is reviewed once by Claude: nothing to do opens nothing (the
+# report is in the run summary), a fix comes as a pull request, anything that
+# needs you as an issue, and new features worth using as an "enhancement" issue.
+# What has been reviewed is kept on the watch-state branch.
 on:
   schedule:
     - cron: "17 5 * * *"
@@ -250,6 +251,7 @@ jobs:
           WATCH_KEYS: ${{ needs.detect.outputs.keys }}
           WATCH_SUBJECT: ${{ needs.detect.outputs.subject }}
           WATCH_BRANCH: claude/compat-${{ github.run_number }}
+          WATCH_CLEAR_POLICY: strict
         run: bash .github/scripts/watch.sh report "$RUNNER_TEMP/watch"
 
       # Artifacts of public repositories can be downloaded by anyone signed in
