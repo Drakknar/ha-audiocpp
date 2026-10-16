@@ -13,7 +13,7 @@ from collections.abc import Mapping
 import difflib
 from typing import Any
 
-from .api import ModelInfo, ModelParam
+from .api import RESERVED_SPEECH_KEYS, ModelInfo, ModelParam
 
 # Top-level speech fields the server copies into the model's options, mapped
 # to the option name it uses (``build_speech_request`` in the server's
@@ -35,10 +35,6 @@ _COPIED_FIELDS = {
 # language, which Chatterbox reads only from there.
 _SERVER_FIELDS = frozenset({"voice", "voice_ref", "language", "return_text"})
 _SPEED_FIELDS = frozenset({"speed", "speaking_rate"})
-# Set by the client; extra options never override them (see api.py).
-_IGNORED_FIELDS = frozenset(
-    {"model", "input", "stream", "stream_format", "response_format"}
-)
 _OPTIONS = "options"
 
 
@@ -91,7 +87,8 @@ def check_speech_options(
     if speed is not None:
         problems.append(_check_speed("speed", speed, model))
     for key, value in (extra or {}).items():
-        if key in _IGNORED_FIELDS or key in _SERVER_FIELDS:
+        # The client sets the reserved fields itself and drops them from extra.
+        if key in RESERVED_SPEECH_KEYS or key in _SERVER_FIELDS:
             continue
         if key == _OPTIONS:
             if not isinstance(value, Mapping):

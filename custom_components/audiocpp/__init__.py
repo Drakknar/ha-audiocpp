@@ -15,7 +15,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import AudioCppClient, AudioCppError
+from .api import AudioCppClient, AudioCppError, ModelInfo
 from .const import CONF_EXTRA_OPTIONS, CONF_SPEED, DOMAIN, SUBENTRY_TTS
 from .options import check_speech_options
 
@@ -59,17 +59,25 @@ async def _async_check_engine_options(
     an engine saved before it would otherwise only fail when Assist speaks.
     Issues of engines that are fine again, or gone, are removed.
     """
-    try:
-        models = {model.id: model for model in await entry.runtime_data.models()}
-    except AudioCppError as err:
-        # Not a reason to fail setup; the check runs again on the next one.
-        _LOGGER.debug("Could not list models to check engine options: %s", err)
-        return
+    # Only speed and extra options are checked, so most engines need no
+    # model listing at all.
+    engines = [
+        subentry
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TTS
+        and (subentry.data.get(CONF_SPEED) is not None or subentry.data.get(CONF_EXTRA_OPTIONS))
+    ]
+    models: dict[str, ModelInfo] = {}
+    if engines:
+        try:
+            models = {model.id: model for model in await entry.runtime_data.models()}
+        except AudioCppError as err:
+            # Not a reason to fail setup; the check runs again on the next one.
+            _LOGGER.debug("Could not list models to check engine options: %s", err)
+            return
     prefix = _issue_prefix(entry)
     current: set[str] = set()
-    for subentry in entry.subentries.values():
-        if subentry.subentry_type != SUBENTRY_TTS:
-            continue
+    for subentry in engines:
         model = models.get(subentry.data[CONF_MODEL])
         if model is None:
             continue

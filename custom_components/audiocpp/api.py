@@ -43,7 +43,7 @@ MAX_ERROR_TEXT = 300
 
 # Fields the client sets itself. User supplied extra options never override
 # them, so a stray key cannot switch the response to a format we do not read.
-_RESERVED_SPEECH_KEYS = frozenset(
+RESERVED_SPEECH_KEYS = frozenset(
     {"model", "input", "stream", "stream_format", "response_format"}
 )
 
@@ -66,13 +66,13 @@ class AudioCppRequestError(AudioCppError):
 
 @dataclass(frozen=True, slots=True)
 class ModelParam:
-    """A request option a model's spec declares (``include_params``)."""
+    """A request option a model's spec declares (``include_params``).
+
+    Only what the option check uses is kept; the server also sends the
+    option's type, description, default and whether it is required.
+    """
 
     name: str
-    type: str = ""
-    required: bool = False
-    description: str = ""
-    default: Any = None
     min: float | None = None
     max: float | None = None
     # Allowed values of an enum option; empty for any other type.
@@ -196,10 +196,6 @@ def _parse_params(rows: Any) -> tuple[ModelParam, ...] | None:
         params.append(
             ModelParam(
                 name=row["name"],
-                type=str(row.get("type", "")),
-                required=row.get("required") is True,
-                description=str(row.get("description", "")),
-                default=row.get("default"),
                 min=_number(row.get("min")),
                 max=_number(row.get("max")),
                 values=tuple(str(v) for v in values) if isinstance(values, list) else (),
@@ -377,7 +373,7 @@ class AudioCppClient:
         body = {
             key: value
             for key, value in (extra or {}).items()
-            if key not in _RESERVED_SPEECH_KEYS
+            if key not in RESERVED_SPEECH_KEYS
         }
         body["model"] = model
         body["input"] = text
