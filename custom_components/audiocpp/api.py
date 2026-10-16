@@ -2,7 +2,8 @@
 
 Endpoints used, as documented in the server README:
 
-* ``GET  /health`` and ``GET /v1/models`` to validate and discover models.
+* ``GET  /health`` and ``GET /v1/models`` to validate and discover models,
+  with ``include_params`` for each model's declared request options.
 * ``GET  /v1/audio/voices`` to list voices and voice presets for a model.
 * ``POST /v1/audio/speech`` for TTS, either as one WAV response or, for a
   model in streaming mode, as SSE ``speech.audio.delta`` events carrying
@@ -42,7 +43,7 @@ MAX_ERROR_TEXT = 300
 
 # Fields the client sets itself. User supplied extra options never override
 # them, so a stray key cannot switch the response to a format we do not read.
-_RESERVED_SPEECH_KEYS = frozenset(
+RESERVED_SPEECH_KEYS = frozenset(
     {"model", "input", "stream", "stream_format", "response_format"}
 )
 
@@ -64,6 +65,21 @@ class AudioCppRequestError(AudioCppError):
 
 
 @dataclass(frozen=True, slots=True)
+class ModelParam:
+    """A request option a model's spec declares (``include_params``).
+
+    Only what the option check uses is kept; the server also sends the
+    option's type, description, default and whether it is required.
+    """
+
+    name: str
+    min: float | None = None
+    max: float | None = None
+    # Allowed values of an enum option; empty for any other type.
+    values: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ModelInfo:
     """A model configured on the server."""
 
@@ -71,11 +87,27 @@ class ModelInfo:
     family: str
     task: str
     mode: str
+    # The request options the model declares, or None when the server does
+    # not report them (servers before audio.cpp v0.9.1).
+    params: tuple[ModelParam, ...] | None = None
 
     @property
     def streaming(self) -> bool:
         """Return True if the server runs this model in streaming mode."""
         return self.mode == MODE_STREAMING
+
+    def param(self, name: str) -> ModelParam | None:
+        """Return the declared option ``name``, if there is one."""
+        return next((p for p in self.params or () if p.name == name), None)
+
+    @property
+    def speed_param(self) -> ModelParam | None:
+        """Return the option behind the top-level ``speed`` field, if any.
+
+        The server sends ``speed`` to a model declaring either ``speed`` or
+        ``speaking_rate``, and rejects it (other than 1) for any other model.
+        """
+        return self.param("speed") or self.param("speaking_rate")
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +176,32 @@ def parse_wav(data: bytes) -> tuple[PcmFormat, bytes]:
     except (wave.Error, EOFError) as err:
         raise AudioCppRequestError(f"Server returned invalid WAV audio: {err}") from err
     return fmt, frames
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _parse_params(rows: Any) -> tuple[ModelParam, ...] | None:
+    """Parse the ``params`` of a ``/v1/models`` entry; None if absent."""
+    if not isinstance(rows, list):
+        return None
+    params = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+            continue
+        values = row.get("values")
+        params.append(
+            ModelParam(
+                name=row["name"],
+                min=_number(row.get("min")),
+                max=_number(row.get("max")),
+                values=tuple(str(v) for v in values) if isinstance(values, list) else (),
+            )
+        )
+    return tuple(params)
 
 
 async def _error_from_response(response: aiohttp.ClientResponse) -> AudioCppError:
@@ -275,8 +333,12 @@ class AudioCppClient:
         return data
 
     async def models(self) -> list[ModelInfo]:
-        """Return the models configured on the server."""
-        data = await self._get_json("/v1/models")
+        """Return the models configured on the server.
+
+        ``include_params`` (audio.cpp v0.9.1) adds each model's declared
+        request options; older servers ignore the flag and omit them.
+        """
+        data = await self._get_json("/v1/models", params={"include_params": "true"})
         entries = data.get("data") if isinstance(data, dict) else None
         if not isinstance(entries, list):
             raise AudioCppRequestError("/v1/models returned an unexpected shape")
@@ -286,6 +348,7 @@ class AudioCppClient:
                 family=str(entry.get("family", "")),
                 task=str(entry.get("task", "")),
                 mode=str(entry.get("mode", "")),
+                params=_parse_params(entry.get("params")),
             )
             for entry in entries
             if isinstance(entry, dict) and entry.get("id")
@@ -310,7 +373,7 @@ class AudioCppClient:
         body = {
             key: value
             for key, value in (extra or {}).items()
-            if key not in _RESERVED_SPEECH_KEYS
+            if key not in RESERVED_SPEECH_KEYS
         }
         body["model"] = model
         body["input"] = text

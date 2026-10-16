@@ -15,8 +15,11 @@ This folder (`custom_components/audiocpp/`) is self-contained: it holds the code
   hacs.json, README.md            HACS metadata (min HA 2026.9.0) and user docs
   custom_components/audiocpp/     <- this folder
     __init__.py   Entry setup: builds the client, checks /health (ConfigEntryNotReady on failure),
-                  forwards STT+TTS, update listener reloads the entry on any subentry change
-    api.py        AudioCppClient (aiohttp), SSE parser, WAV helpers, URL normalisation, errors
+                  raises/clears engine-option repair issues, forwards STT+TTS, update listener
+                  reloads the entry on any subentry change
+    api.py        AudioCppClient (aiohttp), SSE parser, WAV helpers, URL normalisation, errors,
+                  ModelInfo/ModelParam (declared request options)
+    options.py    check_speech_options: speed + extra_options vs the model's declared options
     config_flow.py  Server flow (user/reconfigure) + subentry flows "tts" and "stt"
     entity.py     Base entity: one device per subentry, unique_id = subentry_id
     tts.py        TTS entity, sentence splitter
@@ -44,7 +47,9 @@ These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `ap
 
 - **`GET /health`:** returns `{"status":"ok","backend":..,"models":N,...}`.
 - **`GET /v1/models`:** returns `{"data":[{id, family, task, mode, loaded, path}]}`.
-  - Since v0.9.1, `?include_params=true` adds `params`: the request options the model's spec declares (`name`, `type`, `required`, `description`, `default`/`min`/`max`, enum `values`). Not used yet.
+  - Since v0.9.1, `?include_params=true` adds `params`: the request options the model's spec declares (`name`, `type`, `required`, `description`, `default`/`min`/`max`, enum `values`). A model declaring none returns `[]`; older servers omit the key (`ModelInfo.params` is then None). The list describes options and does not validate them. The client always sends the flag.
+  - **Which request keys map to options** (`build_speech_request` in `server_protocol.cpp`, v0.9.2): `options.*` go to the model as is. The top-level `seed`, `temperature`, `top_k`, `top_p`, `max_tokens`, `max_steps`, `repetition_penalty`, `guidance_scale`, `num_inference_steps` and `reference_text` are copied into options under the same name, and `instructions` becomes `instruction`. `speed`/`speaking_rate` goes to whichever of the two the model declares. `voice`, `voice_ref` and `language` (the text's language) are read by the server. Any other top-level key is silently ignored, which is why `options.py` says "put it inside `options`" for a declared option sent at the top level.
+  - Checked on the author's live server (2026-10-17): `omnivoice` declares `speed` (no min/max), `text_chunk_size`, `guidance_scale` and others; `nemotron-stream` declares its ASR options.
   - `task` is a token: `tts` and `asr` are the two used here; others include `vad`, `align`, `diar` and `clone`.
   - `mode` is `offline` or `streaming`.
 - **`GET /v1/audio/voices?model=`:** returns `{"voices":[...]}`, which includes the preset names from `server.json` and the `voice_dir` voices.
@@ -100,6 +105,11 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 - **Probe on TTS save:** synthesize `"Hello."` without streaming. This validates the voice, speed and extra options, and stores `sample_rate` and `channels` for streaming. The cost is one inference, plus a model load if the server uses `lazy_load`.
 - **Sentence splitting:** on by default, in both modes. A sentence ends at terminal punctuation followed by whitespace, at CJK punctuation, or at a blank line. Fragments under 20 characters are merged into the next sentence. Without streaming, each sentence's WAV must have the same format as the first, or the request raises an error.
 - **Reserved request fields:** `extra_options` cannot override `model`, `input`, `stream`, `stream_format` or `response_format`.
+- **Declared options (issues #2 and #4):** with a v0.9.1+ server, the TTS speed field appears only when the model declares `speed` or `speaking_rate`, bounded by the declared min/max (fallback 0.25–4.0, and a min of 0 or less is ignored because speed must be positive). Clone models get it the same way. A typed-in model the server doesn't list, or an older server, gets the old always-on field.
+  - **Save check:** before the probe, `check_speech_options` flags unknown option names (with a difflib suggestion), declared options sent at the top level, enum values not in `values`, and numbers outside min/max. It runs only when the server reports params.
+  - **Override:** because `params` only describes options, submitting the flagged speed and extra options again unchanged skips the check (`TTSSubentryFlow._flagged`), and the probe decides.
+  - **Repair issue:** every entry setup (and so every reload or subentry change) runs the same check on each TTS subentry that sets speed or extra options. Models are listed only when at least one such engine exists. Problems raise the non-fixable warning `engine_options_<entry_id>_<subentry_id>` (translation key `engine_options`). Issues for engines that are fine again or removed are deleted, and `async_remove_entry` clears them all. A failed model listing only logs at debug level and never blocks setup.
+  - **Not done:** turning declared options into proper form fields instead of free-form `extra_options` (the "Further" item of issue #2).
 - **Language hint:** the default `language_hint` is `none`, because some models reject a `language` field. The audio.cpp docs show `en` for multipart and `en-US` for Nemotron live.
 - **Minimum version:** set to 2026.9.0, the oldest version verified (2026.9.4 and 2026.10.1 are tested). Older versions with subentries and TTS streaming may work, but this is untested.
 - **SSE parsing:** done by hand rather than with `readline`, because a base64 audio line can exceed aiohttp's line-length limit.
@@ -107,6 +117,8 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 ## Verification status
 
 - **Automated tests:** `pytest` gives 7 passed against HA 2026.9.4 and 2026.10.1 on Python 3.14 (2026-10-12; `test_tts_through_home_assistant` needs an `ffmpeg` binary on PATH and is skipped without one). The tests use a fake server that follows the documented wire format, including full-duplex live STT.
+  - **Declared options (2026-10-17):** 3 new tests (speed field, save check, repair issue). The fake server reports `PARAMS` per model, and `FakeAudioCpp.params = None` acts as a pre-v0.9.1 server. 9 passed, ffmpeg test skipped, on HA 2026.10.1 on the Windows PC.
+  - **Windows runs:** use stub `fcntl.py`/`resource.py` in site-packages and a `-p` plugin that turns `pytest_socket.disable_socket` into a no-op. The hass fixture's teardown then raises `WinError 10022` on some tests, which is an environment issue.
 - **Code review (2026-10-05):** found 2 issues, both fixed and covered by tests. (1) Reconfiguring the server with a blank API key dropped the stored key; a blank key now keeps it. (2) Credentials in the URL leaked into the entry title and logs; `normalize_url` now rejects them.
 - **Bug found in real use (2026-10-05): "TTS engine name is not set".**
   - **Cause:** the entity used `has_entity_name=True` with `_attr_name=None`, so `entity.name` was None, and HA's TTS manager refuses such an engine. Every `tts.speak` failed, and Assist played no audio.
@@ -133,7 +145,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
   - `nemotron-stream`: asr, streaming.
 
   The author's HA was 2026.9.4 at the time.
-- **OmniVoice variant:** `server.omnivoice.json`. Not yet run on the server (as of 2026-10-05).
+- **OmniVoice variant:** `server.omnivoice.json`, running on the author's server since then (2026-10-17: engines `omnivoice-eng`/`omnivoice-ita` on `omnivoice`, STT on `nemotron-stream`).
   - One `omnivoice` entry (task `tts`, mode `streaming`) holds both KITT presets, plus `nemotron-stream`.
   - **Language:** OmniVoice auto-detects it when the request omits `language`, so one entry serves both English and Italian.
   - **Pseudo-streaming:** it emits one SSE delta per text chunk only when `text_chunk_size` is set, so `default_request_options` sets it to 160.

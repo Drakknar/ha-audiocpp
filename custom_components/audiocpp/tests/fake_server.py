@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import io
 import json
 import wave
@@ -17,6 +18,27 @@ MODELS = [
     {"id": "nemotron-stream", "family": "nemotron_asr", "task": "asr", "mode": "streaming"},
     {"id": "parakeet", "family": "parakeet_tdt", "task": "asr", "mode": "offline"},
 ]
+# Request options each model declares (``include_params``, audio.cpp v0.9.1+).
+PARAMS = {
+    "kitt-en": [
+        {"name": "seed", "type": "int", "min": 0},
+        {"name": "temperature", "type": "float", "default": 0.7, "min": 0},
+        {"name": "text_chunk_tokens", "type": "int", "min": 1},
+        {"name": "text_chunk_mode", "type": "enum", "preset": "text_chunk_mode_full",
+         "values": ["word_budget", "tag_aware"]},
+    ],
+    "kokoro": [
+        {"name": "seed", "type": "int", "min": 0},
+        {"name": "speed", "type": "float", "default": 1, "min": 0.5, "max": 2.0},
+    ],
+    "chatterbox-italian": [
+        {"name": "language", "type": "string"},
+        {"name": "exaggeration", "type": "float", "default": 0.5},
+        {"name": "speed", "type": "float", "default": 1},
+    ],
+    "nemotron-stream": [],
+    "parakeet": [],
+}
 
 
 def _pcm(text: str) -> bytes:
@@ -48,6 +70,8 @@ class FakeAudioCpp:
         self.speech_requests: list[dict] = []
         self.transcriptions: list[dict] = []
         self.live: list[dict] = []
+        # None acts as a server before v0.9.1, which reports no params.
+        self.params: dict[str, list[dict]] | None = copy.deepcopy(PARAMS)
         self.app = web.Application()
         self.app.router.add_get("/health", self.health)
         self.app.router.add_get("/v1/models", self.models)
@@ -60,9 +84,11 @@ class FakeAudioCpp:
         return web.json_response({"status": "ok", "backend": "cpu", "models": len(MODELS)})
 
     async def models(self, request: web.Request) -> web.Response:
-        return web.json_response(
-            {"object": "list", "data": [{**m, "object": "model", "loaded": False} for m in MODELS]}
-        )
+        data = [{**m, "object": "model", "loaded": False} for m in MODELS]
+        if self.params is not None and request.query.get("include_params") == "true":
+            for entry in data:
+                entry["params"] = self.params[entry["id"]]
+        return web.json_response({"object": "list", "data": data})
 
     async def voices(self, request: web.Request) -> web.Response:
         return web.json_response({"voices": ["kitt_eng", "alba"]})

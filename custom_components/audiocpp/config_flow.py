@@ -69,8 +69,13 @@ from .const import (
     TASK_CLONE,
     TASK_TTS,
 )
+from .options import check_speech_options
 
 _LOGGER = logging.getLogger(__name__)
+
+# Speed range offered when the model does not declare its own bounds.
+SPEED_MIN = 0.25
+SPEED_MAX = 4.0
 
 # Offered in the language picker; any other tag can be typed in.
 COMMON_LANGUAGES = [
@@ -317,6 +322,14 @@ class TTSSubentryFlow(_EngineSubentryFlow):
 
     _tasks = frozenset({TASK_TTS, TASK_CLONE})
 
+    def __init__(self) -> None:
+        """Initialize the flow."""
+        super().__init__()
+        # Settings last flagged by the option check. Submitting them again
+        # unchanged keeps them: the server only describes its options, so a
+        # model may still take one it does not declare.
+        self._flagged: tuple[Any, Any] | None = None
+
     async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
@@ -329,10 +342,15 @@ class TTSSubentryFlow(_EngineSubentryFlow):
             if not self._can_stream:
                 data[CONF_STREAMING] = False
             extra = data.get(CONF_EXTRA_OPTIONS)
+            checked = (data.get(CONF_SPEED), extra)
             if error := self._check_languages(data[CONF_LANGUAGES]):
                 errors[CONF_LANGUAGES] = error
             elif extra is not None and not isinstance(extra, dict):
                 errors[CONF_EXTRA_OPTIONS] = "invalid_extra_options"
+            elif checked != self._flagged and (problems := self._check_options(data)):
+                self._flagged = checked
+                errors["base"] = "unknown_options"
+                placeholders["error"] = "; ".join(problems)
             else:
                 error_text = await self._probe(data)
                 if error_text is None:
@@ -395,11 +413,40 @@ class TTSSubentryFlow(_EngineSubentryFlow):
                 CONF_SPLIT_SENTENCES, default=self._data.get(CONF_SPLIT_SENTENCES, True)
             )
         ] = BooleanSelector()
-        fields[vol.Optional(CONF_SPEED)] = NumberSelector(
-            NumberSelectorConfig(min=0.25, max=4.0, step=0.05, mode=NumberSelectorMode.BOX)
-        )
+        if (speed_range := self._speed_range()) is not None:
+            fields[vol.Optional(CONF_SPEED)] = NumberSelector(
+                NumberSelectorConfig(
+                    min=speed_range[0],
+                    max=speed_range[1],
+                    step=0.05,
+                    mode=NumberSelectorMode.BOX,
+                )
+            )
         fields[vol.Optional(CONF_EXTRA_OPTIONS)] = ObjectSelector()
         return vol.Schema(fields)
+
+    def _speed_range(self) -> tuple[float, float] | None:
+        """Return the speed field's bounds, or None to leave the field out.
+
+        A server that reports options (v0.9.1+) says whether the model has
+        speed control, clone models included. For an older server, or a
+        model it did not list, the field is offered and the probe decides.
+        """
+        model = self._model
+        if model is None or model.params is None:
+            return SPEED_MIN, SPEED_MAX
+        if (param := model.speed_param) is None:
+            return None
+        low = param.min if param.min is not None and param.min > 0 else SPEED_MIN
+        high = param.max if param.max is not None and param.max > low else max(SPEED_MAX, low)
+        return low, high
+
+    def _check_options(self, data: dict[str, Any]) -> list[str]:
+        if (model := self._model) is None:
+            return []
+        return check_speech_options(
+            model, data.get(CONF_SPEED), data.get(CONF_EXTRA_OPTIONS)
+        )
 
     async def _probe(self, data: dict[str, Any]) -> str | None:
         """Synthesize a short phrase with these settings.
