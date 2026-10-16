@@ -40,10 +40,14 @@ Copy `custom_components/audiocpp` into your Home Assistant `config/custom_compon
 | Voice | A voice id or a voice preset from the server config. Leave empty to use the model's `default_voice_preset`. |
 | Use the streaming endpoint | Receive audio while it is generated. Only offered for models the server runs with `mode: streaming`. |
 | Synthesize sentence by sentence | Start speaking after the first sentence instead of waiting for the whole reply. On by default. |
-| Speed | Speech rate multiplier. Only for models with speed control; other models reject the request. |
-| Extra request options | Extra fields sent with every speech request, such as `seed` or an `options` object. |
+| Speed | Speech rate multiplier. Only shown for models with speed control (clone models included), limited to the range the model declares. |
+| Extra request options | Extra fields sent with every speech request, such as `seed` or an `options` object with model options. |
 
-Saving a TTS engine runs a short test synthesis ("Hello."). This catches settings the model rejects, and records the sample rate that the streaming endpoint doesn't report. The test can take a while if the server first has to load the model.
+Saving a TTS engine first checks the speed and extra request options against the options the server says the model takes (audio.cpp v0.9.1 or newer). A typo or a renamed option is flagged with a suggestion, for example "`guidance` is not an option of omnivoice; did you mean `guidance_scale`?". If you know the model takes it anyway, save again without changes to keep it.
+
+It then runs a short test synthesis ("Hello."). This catches settings the model rejects, and records the sample rate that the streaming endpoint doesn't report. The test can take a while if the server first has to load the model.
+
+With a server older than v0.9.1, the speed field is always shown and only the test synthesis checks the settings.
 
 ### STT engine settings
 
@@ -57,7 +61,7 @@ Saving a TTS engine runs a short test synthesis ("Hello."). This catches setting
 ## Model notes
 
 - **VoxCPM2 streaming** needs `{"options": {"retry_badcase": false}}` in the extra request options. The form suggests it for you.
-- **Chatterbox** only reads the language from the request, so an Italian engine needs `{"language": "it"}` in the extra request options. It has no speed control and no streaming.
+- **Chatterbox** only reads the language from the request, so an Italian engine needs `{"language": "it"}` in the extra request options. It has no streaming, and the speed field appears only if the server's model spec declares speed control.
 - **OmniVoice** detects the language itself, so one engine can serve several languages. For pseudo-streaming, set `text_chunk_size` in the server's `default_request_options`.
 - audio.cpp runs **one request per model at a time** unless the server is started with `--parallel-jobs`.
 
@@ -65,6 +69,7 @@ Saving a TTS engine runs a short test synthesis ("Hello."). This catches setting
 
 - **Cannot connect:** check the URL, and that `audiocpp_server` is running and listening on an address Home Assistant can reach.
 - **Test synthesis failed:** the form shows the server's own error message. Usually the model doesn't support a setting such as speed or voice.
+- **Repair "TTS engine … has settings … does not accept":** each time the server entry loads, saved engines are checked against what the server says each model takes. This usually follows a server upgrade that renamed an option. Reconfigure the engine to fix it, or ignore the issue if the model does take the setting.
 - **Debug logs:** add this to `configuration.yaml`:
 
   ```yaml

@@ -17,14 +17,14 @@ from homeassistant.config_entries import ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.setup import async_setup_component
 
 from custom_components.audiocpp.api import normalize_url
 from custom_components.audiocpp.const import DOMAIN
 from custom_components.audiocpp.tts import _take_sentences
 
-from custom_components.audiocpp.tests.fake_server import SAMPLE_RATE, FakeAudioCpp
+from custom_components.audiocpp.tests.fake_server import PARAMS, SAMPLE_RATE, FakeAudioCpp
 
 
 @pytest.fixture(autouse=True)
@@ -194,6 +194,9 @@ async def test_streaming_tts(hass: HomeAssistant, fake) -> None:
 
 async def test_offline_tts_and_probe_error(hass: HomeAssistant, fake) -> None:
     server, url = fake
+    # A server before v0.9.1 does not say which models take speed, so the
+    # field is offered and the test synthesis decides.
+    server.params = None
     entry = await _add_server(hass, url)
 
     # Speed is rejected by kitt-en: the test synthesis shows the server's reason.
@@ -225,6 +228,110 @@ async def test_offline_tts_and_probe_error(hass: HomeAssistant, fake) -> None:
     (request,) = server.speech_requests
     assert request["model"] == "kokoro" and request["seed"] == 7 and request["voice"] == "alba"
     assert "stream_format" not in request
+
+
+async def test_speed_field_follows_model(hass: HomeAssistant, fake) -> None:
+    server, url = fake
+    entry = await _add_server(hass, url)
+
+    async def settings_fields(model: str) -> dict:
+        result = await hass.config_entries.subentries.async_init(
+            (entry.entry_id, "tts"), context={"source": "user"}
+        )
+        result = await hass.config_entries.subentries.async_configure(
+            result["flow_id"], {"model": model}
+        )
+        return {str(key): value for key, value in result["data_schema"].schema.items()}
+
+    def bounds(selector) -> tuple:
+        return selector.config["min"], selector.config["max"]
+
+    # Pocket TTS declares no speed control, so there is no field to get wrong.
+    assert "speed" not in await settings_fields("kitt-en")
+    # Kokoro declares its range; a clone model declaring speed gets the field too.
+    assert bounds((await settings_fields("kokoro"))["speed"]) == (0.5, 2.0)
+    assert bounds((await settings_fields("chatterbox-italian"))["speed"]) == (0.25, 4.0)
+    # A server before v0.9.1 does not say: the field is offered, the probe decides.
+    server.params = None
+    assert bounds((await settings_fields("kitt-en"))["speed"]) == (0.25, 4.0)
+
+
+async def test_extra_options_checked(hass: HomeAssistant, fake) -> None:
+    server, url = fake
+    entry = await _add_server(hass, url)
+    server.speech_requests.clear()
+    settings = {
+        "name": "KITT", "languages": ["en"], "streaming": True, "split_sentences": True,
+        "extra_options": {
+            "seed": 3, "language": "en", "model": "ignored",
+            "max_tokens": 96, "text_chunk_tokens": 40, "temprature": 0.5,
+            "options": {"text_chunk_mode": "endline", "sed": 1, "temperature": -1},
+        },
+    }
+    result = await _add_engine(hass, entry, "tts", "kitt-en", settings)
+    assert result["errors"] == {"base": "unknown_options"}
+    error = result["description_placeholders"]["error"]
+    assert "`max_tokens` is not an option of kitt-en" in error
+    assert "`text_chunk_tokens` is a model option: put it inside `options`" in error
+    assert (
+        "`temprature` is neither a speech request field nor an option of kitt-en; "
+        "did you mean `temperature`?"
+    ) in error
+    assert "`text_chunk_mode` must be one of word_budget, tag_aware" in error
+    assert "`sed` is not an option of kitt-en; did you mean `seed`?" in error
+    assert "`temperature` must be at least 0" in error
+    # Declared, server-read and client-set fields pass.
+    assert "`seed` is" not in error and "`language`" not in error and "`model`" not in error
+    # Flagged before the test synthesis, so the server was not asked.
+    assert server.speech_requests == []
+
+    # Saving again unchanged keeps them: the model may take undeclared options.
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], settings)
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+
+
+async def test_repair_issue_for_stale_options(hass: HomeAssistant, fake) -> None:
+    server, url = fake
+    entry = await _add_server(hass, url)
+    result = await _add_engine(
+        hass, entry, "tts", "kokoro",
+        {"name": "Kokoro", "languages": ["en"], "split_sentences": True,
+         "speed": 1.5, "extra_options": {"seed": 7}},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    sub = _subentry(entry, "tts")
+    issues = ir.async_get(hass)
+    issue_id = f"engine_options_{entry.entry_id}_{sub.subentry_id}"
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+
+    async def reload() -> None:
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    # A server upgrade renames seed and drops speed control.
+    server.params["kokoro"] = [{"name": "random_seed", "type": "int"}]
+    await reload()
+    issue = issues.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None and issue.translation_key == "engine_options"
+    assert issue.translation_placeholders["engine"] == "Kokoro"
+    assert issue.translation_placeholders["problems"] == (
+        "kokoro has no speed control; `seed` is not an option of kokoro"
+    )
+    # The engine itself still loads.
+    _entity(hass, tts.DATA_COMPONENT, "tts", sub.subentry_id)
+
+    # Fixed on the server again: the issue goes away.
+    server.params["kokoro"] = PARAMS["kokoro"]
+    await reload()
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
+
+    # Removing the engine removes its issue.
+    server.params["kokoro"] = []
+    await reload()
+    assert issues.async_get_issue(DOMAIN, issue_id) is not None
+    hass.config_entries.async_remove_subentry(entry, sub.subentry_id)
+    await hass.async_block_till_done()
+    assert issues.async_get_issue(DOMAIN, issue_id) is None
 
 
 async def test_stt_live_and_file(hass: HomeAssistant, fake) -> None:

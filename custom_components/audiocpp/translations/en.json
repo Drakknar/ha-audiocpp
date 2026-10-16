@@ -52,6 +52,7 @@
         "no_models": "The server has no TTS models configured. You can still type a model id.",
         "invalid_languages": "Enter at least one language tag, such as en or it-IT.",
         "invalid_extra_options": "Extra request options must be a mapping of keys to values.",
+        "unknown_options": "The server's description of {model} does not match these settings: {error}. Fix them, or save again without changes to keep them anyway.",
         "probe_failed": "A test synthesis failed: {error}"
       },
       "step": {
@@ -79,8 +80,8 @@
             "voice": "A voice id or a voice preset from the server config. Leave empty to use the model's default_voice_preset.",
             "streaming": "Receive audio as it is generated (SSE PCM). Only offered for models the server runs with mode streaming.",
             "split_sentences": "Start speaking after the first sentence instead of waiting for the whole reply. Turn off if the model sounds better with the full text.",
-            "speed": "Speech rate multiplier. Leave empty unless the model supports speed control; models without it reject the request.",
-            "extra_options": "Extra fields merged into every speech request, for example seed, max_tokens or an options object. model, input and the format fields are set by the integration."
+            "speed": "Speech rate multiplier. Only shown for models with speed control, within the range the model declares. Servers before audio.cpp v0.9.1 do not say, so it is always shown there and the test synthesis tells you if the model rejects it.",
+            "extra_options": "Extra fields merged into every speech request, for example seed, max_tokens or an options object with model options. model, input and the format fields are set by the integration. Keys the model does not declare are flagged before the test synthesis."
           }
         }
       }
@@ -135,6 +136,12 @@
         "code": "Language code (en)",
         "full": "Full tag (en-US)"
       }
+    }
+  },
+  "issues": {
+    "engine_options": {
+      "title": "TTS engine {engine} has settings {model} does not accept",
+      "description": "The audio.cpp server's description of {model} does not match the settings of the TTS engine {engine}: {problems}.\n\nThis often follows a server upgrade that renamed an option. Reconfigure the engine from the audio.cpp server's entry to fix it. If the model does take these settings, ignore this issue."
     }
   }
 }
