@@ -44,12 +44,13 @@ Home Assistant ignores `CLAUDE.md`, `pytest.ini` and `tests/` when the folder is
 
 ## Findings: audio.cpp server API
 
-These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `app/server/README.md` and `app/server/runtime.cpp`. Rechecked against `v0.9.1` (2026-10-12): none of the items below changed.
+These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `app/server/README.md` and `app/server/runtime.cpp`. Rechecked against `v0.9.1` (2026-10-12): none of the items below changed. Rechecked against `v0.9.2-drama3-base-small` (2026-10-19): only additions, noted below.
 
 - **`GET /health`:** returns `{"status":"ok","backend":..,"models":N,...}`.
 - **`GET /v1/models`:** returns `{"data":[{id, family, task, mode, loaded, path}]}`.
+  - Since `v0.9.2-drama3-base-small`, entries also carry `device` (the effective backend device index) and `configured` (false for a model loaded through `POST /v1/models/load`). `/health` reports no version, so `ModelInfo.instruct_field` uses the presence of `configured` to recognise that server.
   - Since v0.9.1, `?include_params=true` adds `params`: the request options the model's spec declares (`name`, `type`, `required`, `description`, `default`/`min`/`max`, enum `values`). A model declaring none returns `[]`; older servers omit the key (`ModelInfo.params` is then None). The list describes options and does not validate them. The client always sends the flag.
-  - **Which request keys map to options** (`build_speech_request` in `server_protocol.cpp`, v0.9.2): `options.*` go to the model as is. The top-level `seed`, `temperature`, `top_k`, `top_p`, `max_tokens`, `max_steps`, `repetition_penalty`, `guidance_scale`, `num_inference_steps` and `reference_text` are copied into options under the same name, and `instructions` becomes `instruction`. `speed`/`speaking_rate` goes to whichever of the two the model declares. `voice`, `voice_ref` and `language` (the text's language) are read by the server. Any other top-level key is silently ignored, which is why `options.py` says "put it inside `options`" for a declared option sent at the top level.
+  - **Which request keys map to options** (`build_speech_request` in `server_protocol.cpp`, v0.9.2): `options.*` go to the model as is. The top-level `seed`, `temperature`, `top_k`, `top_p`, `max_tokens`, `max_steps`, `repetition_penalty`, `guidance_scale`, `num_inference_steps` and `reference_text` are copied into options under the same name, and `instructions` becomes `instruction`. Since `v0.9.2-drama3-base-small`, a top-level `instruct` goes to the option `instruct`, and sending both `instruct` and `instructions` is a 400. `options.py` accepts a top-level `instruct` only on such a server, and flags the pair. `speed`/`speaking_rate` goes to whichever of the two the model declares. `voice`, `voice_ref` and `language` (the text's language) are read by the server. Any other top-level key is silently ignored, which is why `options.py` says "put it inside `options`" for a declared option sent at the top level.
   - Checked on the author's live server (2026-10-17): `omnivoice` declares `speed` (no min/max), `text_chunk_size`, `guidance_scale` and others; `nemotron-stream` declares its ASR options.
   - `task` is a token: `tts` and `asr` are the two used here; others include `vad`, `align`, `diar` and `clone`.
   - `mode` is `offline` or `streaming`.
@@ -65,6 +66,7 @@ These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `ap
     - `stream_format: audio` gives raw chunked PCM instead (not used).
   - **Non-streaming on a streaming model:** works. The server runs the streaming path and returns the full WAV, and the probe relies on this.
   - **Speed:** `speed`/`speaking_rate` is accepted only by models with speed control; other models reject it. Since v0.9.1, `speed: 1` is accepted as omitted by models without speed control, and an explicit value (including 1) overrides the server's configured request defaults. Clone and voice-design models now get speed support too when their spec declares it.
+  - **Voice presets:** since `v0.9.2-drama3-base-small` they can carry `options`, which fill the request options the request does not set.
   - **Voice resolution order:** `voice_ref` > a preset matching `voice` > a `voice_dir` wav > the model-native voice id. When `voice` is omitted, `default_voice_preset` is injected.
   - **VoxCPM2 streaming:** requires `options.retry_badcase=false`. The flow suggests this through `extra_options`.
 - **`POST /v1/audio/transcriptions`:**
@@ -122,6 +124,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 
 - **Automated tests:** `pytest` gives 7 passed against HA 2026.9.4 and 2026.10.1 on Python 3.14 (2026-10-12; `test_tts_through_home_assistant` needs an `ffmpeg` binary on PATH and is skipped without one). The tests use a fake server that follows the documented wire format, including full-duplex live STT.
   - **Declared options (2026-10-17):** 3 new tests (speed field, save check, repair issue). The fake server reports `PARAMS` per model, and `FakeAudioCpp.params = None` acts as a pre-v0.9.1 server. 9 passed, ffmpeg test skipped, on HA 2026.10.1 on the Windows PC.
+  - **audio.cpp `v0.9.2-drama3-base-small` (2026-10-19):** the fake server lists `device`/`configured`, and rejects a top-level `instruct` sent together with `instructions` (`FakeAudioCpp.instruct_field = False` acts as an older server). 1 new test. 10 passed, ffmpeg test skipped, on HA 2026.10.1 on Python 3.14. Rebased onto 0.3.0 (2026-10-27): 15 passed, ffmpeg test skipped.
   - **Windows runs:** use stub `fcntl.py`/`resource.py` in site-packages and a `-p` plugin that turns `pytest_socket.disable_socket` into a no-op. The hass fixture's teardown then raises `WinError 10022` on some tests, which is an environment issue.
 - **Code review (2026-10-05):** found 2 issues, both fixed and covered by tests. (1) Reconfiguring the server with a blank API key dropped the stored key; a blank key now keeps it (since 2026-10-24 only for the same host and port). (2) Credentials in the URL leaked into the entry title and logs; `normalize_url` now rejects them.
 - **Bug found in real use (2026-10-05): "TTS engine name is not set".**

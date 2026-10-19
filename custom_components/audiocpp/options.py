@@ -34,6 +34,9 @@ _COPIED_FIELDS = {
 # Top-level fields the server reads itself. ``language`` is the text's
 # language, which Chatterbox reads only from there.
 _SERVER_FIELDS = frozenset({"voice", "voice_ref", "language", "return_text"})
+# Copied into options as is, like ``_COPIED_FIELDS``, but only by servers that
+# read it (``ModelInfo.instruct_field``).
+_INSTRUCT = "instruct"
 _SPEED_FIELDS = frozenset({"speed", "speaking_rate"})
 _OPTIONS = "options"
 
@@ -84,6 +87,11 @@ def check_speech_options(
     if model.params is None:
         return []
     problems: list[str | None] = []
+    copied = dict(_COPIED_FIELDS)
+    if model.instruct_field:
+        copied[_INSTRUCT] = _INSTRUCT
+        if extra and _INSTRUCT in extra and "instructions" in extra:
+            problems.append("`instruct` and `instructions` cannot both be set")
     if speed is not None:
         problems.append(_check_speed("speed", speed, model))
     for key, value in (extra or {}).items():
@@ -99,8 +107,8 @@ def check_speech_options(
             )
         elif key in _SPEED_FIELDS:
             problems.append(_check_speed(key, value, model))
-        elif key in _COPIED_FIELDS:
-            problems.append(_check_option(key, value, _COPIED_FIELDS[key], model))
+        elif key in copied:
+            problems.append(_check_option(key, value, copied[key], model))
         elif model.param(key) is not None:
             # The server ignores top-level fields it does not know.
             problems.append(f"`{key}` is a model option: put it inside `options`")
