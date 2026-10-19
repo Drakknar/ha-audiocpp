@@ -90,6 +90,9 @@ class ModelInfo:
     # The request options the model declares, or None when the server does
     # not report them (servers before audio.cpp v0.9.1).
     params: tuple[ModelParam, ...] | None = None
+    # Whether the server reads a top-level ``instruct`` (audio.cpp
+    # v0.9.2-drama3-base-small and later, which also list ``configured``).
+    instruct_field: bool = False
 
     @property
     def streaming(self) -> bool:
@@ -349,6 +352,7 @@ class AudioCppClient:
                 task=str(entry.get("task", "")),
                 mode=str(entry.get("mode", "")),
                 params=_parse_params(entry.get("params")),
+                instruct_field="configured" in entry,
             )
             for entry in entries
             if isinstance(entry, dict) and entry.get("id")
