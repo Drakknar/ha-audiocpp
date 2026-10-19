@@ -290,6 +290,36 @@ async def test_extra_options_checked(hass: HomeAssistant, fake) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY, result
 
 
+async def test_top_level_instruct(hass: HomeAssistant, fake) -> None:
+    server, url = fake
+    entry = await _add_server(hass, url)
+    settings = {
+        "name": "KITT", "languages": ["en"], "streaming": True, "split_sentences": True,
+        "extra_options": {"instruct": "calm", "instructions": "calm"},
+    }
+    # Newer servers read a top-level `instruct` and reject both spellings.
+    result = await _add_engine(hass, entry, "tts", "kitt-en", settings)
+    assert result["errors"] == {"base": "unknown_options"}
+    error = result["description_placeholders"]["error"]
+    assert "`instruct` and `instructions` cannot both be set" in error
+    assert "`instruct` is a model option" not in error
+
+    settings["extra_options"] = {"instruct": "calm"}
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], settings)
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    await hass.async_block_till_done()
+    assert server.speech_requests[-1]["instruct"] == "calm"
+
+    # Older servers ignore it at the top level.
+    server.instruct_field = False
+    result = await _add_engine(hass, entry, "tts", "kitt-en", settings)
+    assert result["errors"] == {"base": "unknown_options"}
+    assert (
+        "`instruct` is a model option: put it inside `options`"
+        in result["description_placeholders"]["error"]
+    )
+
+
 async def test_repair_issue_for_stale_options(hass: HomeAssistant, fake) -> None:
     server, url = fake
     entry = await _add_server(hass, url)

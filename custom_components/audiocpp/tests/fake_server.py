@@ -26,6 +26,7 @@ PARAMS = {
         {"name": "text_chunk_tokens", "type": "int", "min": 1},
         {"name": "text_chunk_mode", "type": "enum", "preset": "text_chunk_mode_full",
          "values": ["word_budget", "tag_aware"]},
+        {"name": "instruct", "type": "string"},
     ],
     "kokoro": [
         {"name": "seed", "type": "int", "min": 0},
@@ -72,6 +73,9 @@ class FakeAudioCpp:
         self.live: list[dict] = []
         # None acts as a server before v0.9.1, which reports no params.
         self.params: dict[str, list[dict]] | None = copy.deepcopy(PARAMS)
+        # False acts as a server before v0.9.2-drama3-base-small, which lists
+        # no `device`/`configured` and ignores a top-level `instruct`.
+        self.instruct_field = True
         self.app = web.Application()
         self.app.router.add_get("/health", self.health)
         self.app.router.add_get("/v1/models", self.models)
@@ -85,6 +89,9 @@ class FakeAudioCpp:
 
     async def models(self, request: web.Request) -> web.Response:
         data = [{**m, "object": "model", "loaded": False} for m in MODELS]
+        if self.instruct_field:
+            for entry in data:
+                entry.update(device=0, configured=True)
         if self.params is not None and request.query.get("include_params") == "true":
             for entry in data:
                 entry["params"] = self.params[entry["id"]]
@@ -101,6 +108,8 @@ class FakeAudioCpp:
             return _error(400, f"unknown model: {body['model']}")
         if "speed" in body and body["model"] == "kitt-en":
             return _error(400, "model does not support speed")
+        if self.instruct_field and "instruct" in body and "instructions" in body:
+            return _error(400, "instruct and instructions cannot both be set")
         text = body["input"]
         if "stream_format" not in body:
             return web.Response(body=_wav(_pcm(text)), content_type="audio/wav")
