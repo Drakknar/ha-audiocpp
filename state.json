@@ -1,9 +1,11 @@
 {
   "audiocpp:from:v0.9.1": "c6b104e",
   "audiocpp:from:v0.9.2": "v0.9.1",
-  "audiocpp:last": "v0.9.2",
+  "audiocpp:from:v0.9.2-drama3-base-small": "v0.9.2",
+  "audiocpp:last": "v0.9.2-drama3-base-small",
   "audiocpp:v0.9.1": "done:2026-10-12",
   "audiocpp:v0.9.2": "done:2026-10-16",
+  "audiocpp:v0.9.2-drama3-base-small": "done:2026-10-19",
   "ha:2026.10": "done:2026-10-12",
   "ha:from:2026.10": "2026.9.0",
   "ha:last": "2026.10.1"
