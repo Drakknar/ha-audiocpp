@@ -2,7 +2,7 @@ name: Compatibility review
 
 # Daily check for new versions of what this repository depends on:
 # Home Assistant core (stable releases incl. patches, and new betas) and the
-# audio.cpp server (releases, and unreleased server commits on its main branch).
+# audio.cpp server (published releases only, never branch commits).
 # Each new version is reviewed once by Claude: nothing to do opens nothing (the
 # report is in the run summary), a fix comes as a pull request, anything that
 # needs you as an issue, and new features worth using as an "enhancement" issue.
@@ -109,14 +109,9 @@ jobs:
           CTX
           fi
 
-          # audio.cpp, two tracks:
-          # - each published release (audiocpp:<tag>);
-          # - unreleased commits to app/server/ on the default branch
-          #   (audiocpp:main:<sha>), so an API change shows up before it ships.
-          #   Compared with the newer of the release and the last commit
-          #   reviewed (audiocpp:main); nothing to do while the release has it.
-          up=repos/0xShug0/audio.cpp
-          rel=$(gh api "$up/releases/latest" --jq .tag_name)
+          # audio.cpp: each published release. Commits to its default branch
+          # are not reviewed until a release ships them.
+          rel=$(gh api repos/0xShug0/audio.cpp/releases/latest --jq .tag_name)
           prev=$(w get audiocpp:last)
           # Already reviewed: a repeat (force) covers the same range again.
           [ "$prev" != "$rel" ] || prev=$(w get "audiocpp:from:$rel")
@@ -125,34 +120,12 @@ jobs:
             keys+=("audiocpp:$rel=@" "audiocpp:from:$rel=$prev" "audiocpp:last=$rel")
             subjects+=("audio.cpp $rel")
             cat >> "$ctx" <<CTX
-          ## audio.cpp server (release)
+          ## audio.cpp server
           - Last reviewed: $prev. New: $rel.
           - Release: https://github.com/0xShug0/audio.cpp/releases/tag/$rel
           - Source: https://github.com/0xShug0/audio.cpp/compare/$prev...$rel
 
           CTX
-          fi
-
-          ahead() { [ "$(gh api "$up/compare/$1...$2" --jq .status)" = ahead ]; }
-          branch=$(gh api "$up" --jq .default_branch)
-          head=$(gh api "$up/commits?sha=$branch&path=app/server&per_page=1" --jq '.[0].sha')
-          if ahead "$rel" "$head" && due "audiocpp:main:$head"; then
-            prev=$(w get "audiocpp:from:main:$head")
-            if [ -z "$prev" ]; then
-              prev=$rel
-              last_main=$(w get audiocpp:main)
-              if [ -n "$last_main" ] && ahead "$rel" "$last_main"; then prev=$last_main; fi
-            fi
-            if [ "$prev" != "$head" ]; then
-              keys+=("audiocpp:main:$head=@" "audiocpp:from:main:$head=$prev" "audiocpp:main=$head")
-              subjects+=("audio.cpp $branch@${head:0:9}")
-              cat >> "$ctx" <<CTX
-          ## audio.cpp server (unreleased, $branch branch)
-          - Last reviewed: $prev. New: $head, the newest commit on $branch that touches app/server/. Not in any release yet; the latest release is $rel.
-          - Source: https://github.com/0xShug0/audio.cpp/compare/$prev...$head
-
-          CTX
-            fi
           fi
 
           if [ ${#keys[@]} -eq 0 ]; then
