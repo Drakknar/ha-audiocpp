@@ -1,7 +1,8 @@
 name: Compatibility review
 
 # Daily check for new versions of what this repository depends on:
-# Home Assistant core and the audio.cpp server.
+# Home Assistant core (stable releases incl. patches, and new betas) and the
+# audio.cpp server (releases, and unreleased server commits on its main branch).
 # Each new version is reviewed once by Claude: nothing to do opens nothing (the
 # report is in the run summary), a fix comes as a pull request, anything that
 # needs you as an issue, and new features worth using as an "enhancement" issue.
@@ -53,32 +54,69 @@ jobs:
           keys=()
           subjects=()
 
-          # Home Assistant: one review per minor release, starting with its first
-          # beta, so a breaking change shows up before the release reaches you.
+          # Home Assistant, two tracks:
+          # - every stable release, patch releases included (ha:<tag>), compared
+          #   with the last stable one reviewed (ha:stable). An X.Y.0 whose beta
+          #   was reviewed is compared with that beta instead.
+          # - the first beta of a new minor release (ha:<minor>), compared with
+          #   the last stable one, so a breaking change shows up before the
+          #   release reaches you.
           tags=$(gh api "repos/home-assistant/core/releases?per_page=50" --jq '.[].tag_name' \
             | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+(b[0-9]+)?$')
+          stable=$(grep -v b <<<"$tags" | sort -V | tail -n1)
           minor=$(sort -V <<<"$tags" | tail -n1 | cut -d. -f1,2)
-          tag=$(grep "^$minor\." <<<"$tags" | grep -v b | sort -V | tail -n1 || true)
-          [ -n "$tag" ] || tag=$(grep "^$minor\." <<<"$tags" | sort -V | tail -n1)
-          if due "ha:$minor"; then
+          last_stable=$(w get ha:stable)
+          last_stable=${last_stable:-$(w get ha:last)}
+          last_stable=${last_stable:-$(jq -r .homeassistant hacs.json)}
+
+          if due "ha:$stable"; then
             # A repeat (force) covers the same range as the first review.
+            prev=$(w get "ha:from:$stable")
+            if [ -z "$prev" ] && [ "${stable##*.}" = 0 ]; then
+              prev=$(w get "ha:beta:${stable%.*}")
+            fi
+            prev=${prev:-$last_stable}
+            if [ "$prev" = "$stable" ]; then
+              # Already covered by an earlier review: only the starting point.
+              [ "$FORCE" = true ] || w set "ha:$stable=baseline:$(date -u +%F)" "ha:stable=$stable"
+            else
+              keys+=("ha:$stable=@" "ha:from:$stable=$prev" "ha:stable=$stable")
+              subjects+=("Home Assistant $stable")
+              cat >> "$ctx" <<CTX
+          ## Home Assistant core (stable release)
+          - Last reviewed: $prev. New: $stable.
+          - Source: https://github.com/home-assistant/core/compare/$prev...$stable
+          - Frontend version each release ships: homeassistant/components/frontend/manifest.json at that tag.
+
+          CTX
+            fi
+          fi
+
+          # The newest minor has no stable release yet: review its newest beta.
+          minor_stable=$(grep -v b <<<"$tags" | grep "^$minor\." || true)
+          if [ -z "$minor_stable" ] && due "ha:$minor"; then
+            beta=$(grep "^$minor\." <<<"$tags" | sort -V | tail -n1)
             prev=$(w get "ha:from:$minor")
-            [ -n "$prev" ] || prev=$(w get ha:last)
-            prev=${prev:-$(jq -r .homeassistant hacs.json)}
-            keys+=("ha:$minor=@" "ha:from:$minor=$prev" "ha:last=$tag")
-            subjects+=("Home Assistant $tag")
-            beta=""
-            case "$tag" in *b*) beta=" This is a beta; the final release follows about a week later." ;; esac
+            prev=${prev:-$stable}
+            keys+=("ha:$minor=@" "ha:from:$minor=$prev" "ha:beta:$minor=$beta")
+            subjects+=("Home Assistant $beta")
             cat >> "$ctx" <<CTX
-          ## Home Assistant core
-          - Last reviewed: $prev. New: $tag.$beta
-          - Source: https://github.com/home-assistant/core/compare/$prev...$tag
+          ## Home Assistant core (beta)
+          - Last reviewed: $prev. New: $beta. This is a beta; the final release follows about a week later.
+          - Source: https://github.com/home-assistant/core/compare/$prev...$beta
           - Frontend version each release ships: homeassistant/components/frontend/manifest.json at that tag.
 
           CTX
           fi
 
-          rel=$(gh api repos/0xShug0/audio.cpp/releases/latest --jq .tag_name)
+          # audio.cpp, two tracks:
+          # - each published release (audiocpp:<tag>);
+          # - unreleased commits to app/server/ on the default branch
+          #   (audiocpp:main:<sha>), so an API change shows up before it ships.
+          #   Compared with the newer of the release and the last commit
+          #   reviewed (audiocpp:main); nothing to do while the release has it.
+          up=repos/0xShug0/audio.cpp
+          rel=$(gh api "$up/releases/latest" --jq .tag_name)
           prev=$(w get audiocpp:last)
           # Already reviewed: a repeat (force) covers the same range again.
           [ "$prev" != "$rel" ] || prev=$(w get "audiocpp:from:$rel")
@@ -87,12 +125,34 @@ jobs:
             keys+=("audiocpp:$rel=@" "audiocpp:from:$rel=$prev" "audiocpp:last=$rel")
             subjects+=("audio.cpp $rel")
             cat >> "$ctx" <<CTX
-          ## audio.cpp server
+          ## audio.cpp server (release)
           - Last reviewed: $prev. New: $rel.
           - Release: https://github.com/0xShug0/audio.cpp/releases/tag/$rel
           - Source: https://github.com/0xShug0/audio.cpp/compare/$prev...$rel
 
           CTX
+          fi
+
+          ahead() { [ "$(gh api "$up/compare/$1...$2" --jq .status)" = ahead ]; }
+          branch=$(gh api "$up" --jq .default_branch)
+          head=$(gh api "$up/commits?sha=$branch&path=app/server&per_page=1" --jq '.[0].sha')
+          if ahead "$rel" "$head" && due "audiocpp:main:$head"; then
+            prev=$(w get "audiocpp:from:main:$head")
+            if [ -z "$prev" ]; then
+              prev=$rel
+              last_main=$(w get audiocpp:main)
+              if [ -n "$last_main" ] && ahead "$rel" "$last_main"; then prev=$last_main; fi
+            fi
+            if [ "$prev" != "$head" ]; then
+              keys+=("audiocpp:main:$head=@" "audiocpp:from:main:$head=$prev" "audiocpp:main=$head")
+              subjects+=("audio.cpp $branch@${head:0:9}")
+              cat >> "$ctx" <<CTX
+          ## audio.cpp server (unreleased, $branch branch)
+          - Last reviewed: $prev. New: $head, the newest commit on $branch that touches app/server/. Not in any release yet; the latest release is $rel.
+          - Source: https://github.com/0xShug0/audio.cpp/compare/$prev...$head
+
+          CTX
+            fi
           fi
 
           if [ ${#keys[@]} -eq 0 ]; then
