@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any, override
 from urllib.parse import urlsplit
 
@@ -103,6 +104,14 @@ def _host_port(url: str) -> tuple[str | None, int | None]:
     parts = urlsplit(url)
     port = parts.port or {"http": 80, "https": 443}.get(parts.scheme)
     return (parts.hostname or "").lower() or None, port
+
+REAUTH_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_API_KEY): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        ),
+    }
+)
 
 
 async def _validate_server(
@@ -199,6 +208,40 @@ class AudioCppConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self.add_suggested_values_to_schema(
                 SERVER_SCHEMA, user_input or {CONF_URL: entry.data[CONF_URL]}
             ),
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Start when the server (its proxy) rejects the stored API key."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for a new API key and check it against the server."""
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            data, errors = await _validate_server(
+                self,
+                {CONF_URL: entry.data[CONF_URL], CONF_API_KEY: user_input[CONF_API_KEY]},
+            )
+            if not errors:
+                # An explicit reason keeps our own wording (see reconfigure).
+                if entry.update_listeners:
+                    # Loaded: the update listener reloads it.
+                    return self.async_update_and_abort(
+                        entry, data=data, reason="reauth_successful"
+                    )
+                return self.async_update_reload_and_abort(
+                    entry, data=data, reason="reauth_successful"
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=REAUTH_SCHEMA,
+            description_placeholders={"url": entry.data[CONF_URL]},
             errors=errors,
         )
 

@@ -14,7 +14,7 @@ import pytest
 from homeassistant.components import stt, tts
 from homeassistant.components.tts import TTSAudioRequest
 from homeassistant.components.tts.const import DATA_TTS_MANAGER
-from homeassistant.config_entries import ConfigSubentry
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
@@ -193,6 +193,56 @@ async def test_reconfigure_to_other_server_drops_api_key(hass: HomeAssistant, fa
     assert entry.data == {"url": normalize_url(url)}
     await hass.async_block_till_done()
     await test_server.close()
+
+
+async def test_reauth(hass: HomeAssistant, fake) -> None:
+    """A rejected key at setup starts reauth; a new valid key reloads the entry."""
+    server, url = fake
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": url, "api_key": "old-token"}
+    )
+    entry = result["result"]
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    # The proxy now wants another key: setup fails with an auth error.
+    server.api_key = "new-token"
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    flows = entry.async_get_active_flows(hass, {"reauth"})
+    flow = next(flows)
+    result = await hass.config_entries.flow.async_configure(flow["flow_id"])
+    assert result["step_id"] == "reauth_confirm"
+    assert "old-token" not in str(result)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"api_key": "wrong"}
+    )
+    assert result["errors"] == {"base": "invalid_auth"}
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"api_key": "new-token"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert "translation_domain" not in result
+    assert entry.data == {"url": normalize_url(url), "api_key": "new-token"}
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    # Started by hand on a loaded entry, the update listener does the reload.
+    server.api_key = "third-token"
+    entry.async_start_reauth(hass)
+    await hass.async_block_till_done()
+    flow = next(entry.async_get_active_flows(hass, {"reauth"}))
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {"api_key": "third-token"}
+    )
+    assert result["reason"] == "reauth_successful"
+    await hass.async_block_till_done()
+    assert entry.data["api_key"] == "third-token"
+    assert entry.state is ConfigEntryState.LOADED
 
 
 async def test_streaming_tts(hass: HomeAssistant, fake) -> None:

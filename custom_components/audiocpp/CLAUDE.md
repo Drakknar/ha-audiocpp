@@ -14,13 +14,14 @@ This folder (`custom_components/audiocpp/`) is self-contained: it holds the code
 <repo root>/
   hacs.json, README.md            HACS metadata (min HA 2026.9.0) and user docs
   custom_components/audiocpp/     <- this folder
-    __init__.py   Entry setup: builds the client, checks /health (ConfigEntryNotReady on failure),
+    __init__.py   Entry setup: builds the client, checks /health (ConfigEntryAuthFailed on 401/403,
+                  ConfigEntryNotReady on other failures),
                   raises/clears engine-option repair issues, forwards STT+TTS, update listener
                   reloads the entry on any subentry change
     api.py        AudioCppClient (aiohttp), SSE parser, WAV helpers, URL normalisation, errors,
                   ModelInfo/ModelParam (declared request options)
     options.py    check_speech_options: speed + extra_options vs the model's declared options
-    config_flow.py  Server flow (user/reconfigure) + subentry flows "tts" and "stt"
+    config_flow.py  Server flow (user/reconfigure/reauth) + subentry flows "tts" and "stt"
     entity.py     Base entity: one device per subentry, unique_id = subentry_id
     tts.py        TTS entity, sentence splitter
     stt.py        STT entity
@@ -94,7 +95,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
   - Because of this, the flows update and abort without reloading (`async_update_and_abort`, or its equivalent by hand in the subentry flows; see below).
   - `async_update_reload_and_abort` with an update listener logs a deprecation warning that becomes breaking in 2026.12.
 - **Abort wording (2026.10):** `async_update_and_abort` without `reason` now aborts with `translation_domain="homeassistant"`, so HA's generic "reconfigure successful" text replaces ours ([#180723](https://github.com/home-assistant/core/pull/180723), [#181225](https://github.com/home-assistant/core/pull/181225)).
-  - The server flow passes `reason="reconfigure_successful"` explicitly, which keeps `strings.json`.
+  - The server flow passes `reason="reconfigure_successful"` (and `"reauth_successful"`) explicitly, which keeps `strings.json`.
   - The subentry `async_update_and_abort` only gained `reason` in 2026.10, so the subentry flows call `async_update_subentry` and `async_abort` themselves to stay compatible with 2026.9.
 - **Voluptuous:** since 2026.9, HA aliases `voluptuous` to probatio (`homeassistant/__init__.py`), and 2026.10 bans it in core. `import voluptuous as vol` still works for custom integrations, with no warning.
 - **`LanguageSelector`:** single choice only. Languages therefore use `SelectSelector(multiple=True, custom_value=True)`, validated with a BCP-47-like regex.
@@ -110,6 +111,9 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
   - **Override:** because `params` only describes options, submitting the flagged speed and extra options again unchanged skips the check (`TTSSubentryFlow._flagged`), and the probe decides.
   - **Repair issue:** every entry setup (and so every reload or subentry change) runs the same check on each TTS subentry that sets speed or extra options. Models are listed only when at least one such engine exists. Problems raise the non-fixable warning `engine_options_<entry_id>_<subentry_id>` (translation key `engine_options`). Issues for engines that are fine again or removed are deleted, and `async_remove_entry` clears them all. A failed model listing only logs at debug level and never blocks setup.
   - **Not done:** turning declared options into proper form fields instead of free-form `extra_options` (the "Further" item of issue #2).
+- **API key (owner's decision, 2026-10-24):**
+  - **Reconfigure:** a blank key field keeps the stored key only while the URL's host and port (scheme default if none) stay the same, so the key is never sent to a different server. For a different host or port no key is stored, and a 401/403 from the new server shows `api_key_for_new_server`, which asks for its key.
+  - **Reauth:** a 401/403 from `/health` at setup raises `ConfigEntryAuthFailed`. `reauth_confirm` asks for a new key, checks it against the stored URL, and stores it. A failed entry has no update listener, so the flow uses `async_update_reload_and_abort`; an entry that is still loaded (reauth started by hand) uses `async_update_and_abort` and its update listener reloads it, which avoids the 2026.12 deprecation noted above.
 - **Language hint:** the default `language_hint` is `none`, because some models reject a `language` field. The audio.cpp docs show `en` for multipart and `en-US` for Nemotron live.
 - **Minimum version:** set to 2026.9.0, the oldest version verified (2026.9.4 and 2026.10.1 are tested). Older versions with subentries and TTS streaming may work, but this is untested.
 - **SSE parsing:** done by hand rather than with `readline`, because a base64 audio line can exceed aiohttp's line-length limit.
@@ -119,7 +123,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 - **Automated tests:** `pytest` gives 7 passed against HA 2026.9.4 and 2026.10.1 on Python 3.14 (2026-10-12; `test_tts_through_home_assistant` needs an `ffmpeg` binary on PATH and is skipped without one). The tests use a fake server that follows the documented wire format, including full-duplex live STT.
   - **Declared options (2026-10-17):** 3 new tests (speed field, save check, repair issue). The fake server reports `PARAMS` per model, and `FakeAudioCpp.params = None` acts as a pre-v0.9.1 server. 9 passed, ffmpeg test skipped, on HA 2026.10.1 on the Windows PC.
   - **Windows runs:** use stub `fcntl.py`/`resource.py` in site-packages and a `-p` plugin that turns `pytest_socket.disable_socket` into a no-op. The hass fixture's teardown then raises `WinError 10022` on some tests, which is an environment issue.
-- **Code review (2026-10-05):** found 2 issues, both fixed and covered by tests. (1) Reconfiguring the server with a blank API key dropped the stored key; a blank key now keeps it. (2) Credentials in the URL leaked into the entry title and logs; `normalize_url` now rejects them.
+- **Code review (2026-10-05):** found 2 issues, both fixed and covered by tests. (1) Reconfiguring the server with a blank API key dropped the stored key; a blank key now keeps it (since 2026-10-24 only for the same host and port). (2) Credentials in the URL leaked into the entry title and logs; `normalize_url` now rejects them.
 - **Bug found in real use (2026-10-05): "TTS engine name is not set".**
   - **Cause:** the entity used `has_entity_name=True` with `_attr_name=None`, so `entity.name` was None, and HA's TTS manager refuses such an engine. Every `tts.speak` failed, and Assist played no audio.
   - **Fix:** `has_entity_name=False` with `_attr_name = subentry.title`, as HA core's OpenAI TTS does. Entity ids are unchanged, since they live in the entity registry.
@@ -154,7 +158,6 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
   - **Since then, the author's own `server.json`** switched Pocket TTS to `-bf16.gguf` files in `offline` mode.
 - **Possible improvements:**
   - Diagnostics.
-  - A reauth flow for proxy keys (a 401/403 from the server currently just retries setup with `ConfigEntryNotReady`).
   - More STT sample rates.
   - Filtering voices by language.
   - Translations other than English.

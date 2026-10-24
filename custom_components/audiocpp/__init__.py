@@ -11,11 +11,11 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_KEY, CONF_MODEL, CONF_URL, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import AudioCppClient, AudioCppError, ModelInfo
+from .api import AudioCppAuthError, AudioCppClient, AudioCppError, ModelInfo
 from .const import CONF_EXTRA_OPTIONS, CONF_SPEED, DOMAIN, SUBENTRY_TTS
 from .options import check_speech_options
 
@@ -35,6 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: AudioCppConfigEntry) -> 
     )
     try:
         await client.health()
+    except AudioCppAuthError as err:
+        # A proxy in front of the server rejects the key: ask for a new one.
+        raise ConfigEntryAuthFailed(str(err)) from err
     except AudioCppError as err:
         raise ConfigEntryNotReady(str(err)) from err
 

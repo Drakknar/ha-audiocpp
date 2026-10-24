@@ -2,7 +2,8 @@
   "config": {
     "abort": {
       "already_configured": "This audio.cpp server is already configured.",
-      "reconfigure_successful": "The server was updated."
+      "reconfigure_successful": "The server was updated.",
+      "reauth_successful": "The API key was updated."
     },
     "error": {
       "cannot_connect": "Could not reach the server. Check the URL and that audiocpp_server is running and listening on a reachable address (not 127.0.0.1 if Home Assistant runs elsewhere).",
@@ -33,6 +34,16 @@
         "data_description": {
           "url": "Base URL of the server, for example http://192.168.1.10:8080.",
           "api_key": "Leave empty to keep the current key, which is kept only while the host and port stay the same; for a different server, enter its key. audio.cpp has no authentication of its own; this is only for a reverse proxy that expects a Bearer token."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Update the API key",
+        "description": "The server at {url} refused the stored API key. Enter the key that the reverse proxy in front of audio.cpp expects.",
+        "data": {
+          "api_key": "API key"
+        },
+        "data_description": {
+          "api_key": "The Bearer token the reverse proxy expects."
         }
       }
     }
