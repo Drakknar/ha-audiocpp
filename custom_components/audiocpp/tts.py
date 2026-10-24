@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, AsyncIterable
+from contextlib import aclosing
 import logging
 import re
 from typing import TYPE_CHECKING, Any, override
@@ -128,8 +129,19 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
 
     @override
     async def async_added_to_hass(self) -> None:
-        """Load the voice list once; the server's voices change only on restart."""
+        """Start loading the voice list; the server's voices change only on restart.
+
+        The listing can take up to the connect timeout, so it runs in the
+        background instead of holding up the platform setup. Until it ends,
+        or if it fails, no voices are listed; a voice can still be passed as
+        an option, since the server decides whether it exists.
+        """
         await super().async_added_to_hass()
+        self.entry.async_create_background_task(
+            self.hass, self._async_load_voices(), f"audiocpp voices {self.model}"
+        )
+
+    async def _async_load_voices(self) -> None:
         try:
             voices = await self.client.voices(self.model)
         except AudioCppError as err:
@@ -159,14 +171,19 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
                             "Streaming is on but no sample rate is stored; "
                             "reconfigure this engine"
                         )
-                    async for pcm in self.client.synthesize_stream(
-                        self.model,
-                        text,
-                        voice=voice,
-                        speed=self._speed,
-                        extra=self._extra,
-                    ):
-                        yield self._stream_format, pcm
+                    # aclosing: if the consumer stops early, close the HTTP
+                    # stream now rather than whenever the generator is collected.
+                    async with aclosing(
+                        self.client.synthesize_stream(
+                            self.model,
+                            text,
+                            voice=voice,
+                            speed=self._speed,
+                            extra=self._extra,
+                        )
+                    ) as stream:
+                        async for pcm in stream:
+                            yield self._stream_format, pcm
                     continue
                 fmt, pcm = await self.client.synthesize(
                     self.model,
@@ -209,11 +226,14 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
 
         async def data_gen() -> AsyncGenerator[bytes]:
             header_sent = False
-            async for fmt, pcm in self._pcm(self._texts(request.message_gen), options):
-                if not header_sent:
-                    yield wav_header(fmt)
-                    header_sent = True
-                yield pcm
+            async with aclosing(
+                self._pcm(self._texts(request.message_gen), options)
+            ) as chunks:
+                async for fmt, pcm in chunks:
+                    if not header_sent:
+                        yield wav_header(fmt)
+                        header_sent = True
+                    yield pcm
             if not header_sent:
                 raise HomeAssistantError("audio.cpp returned no audio")
 

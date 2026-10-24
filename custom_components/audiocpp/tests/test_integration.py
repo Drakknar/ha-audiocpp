@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 import io
 import shutil
@@ -13,7 +14,7 @@ import pytest
 from homeassistant.components import stt, tts
 from homeassistant.components.tts import TTSAudioRequest
 from homeassistant.components.tts.const import DATA_TTS_MANAGER
-from homeassistant.config_entries import ConfigSubentry
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
@@ -147,6 +148,103 @@ async def test_reconfigure_keeps_api_key(hass: HomeAssistant, fake) -> None:
     assert entry.data["api_key"] == "proxy-token"
 
 
+async def test_reconfigure_to_other_server_drops_api_key(hass: HomeAssistant, fake) -> None:
+    """The stored key is never sent to a different host or port."""
+    _, url = fake
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": url, "api_key": "proxy-token"}
+    )
+    entry = result["result"]
+    await hass.async_block_till_done()
+    # A second server on the same host, but another port.
+    server = FakeAudioCpp()
+    test_server = TestServer(server.app, host="127.0.0.1")
+    await test_server.start_server()
+    other = str(test_server.make_url("/"))
+
+    server.api_key = "proxy-token"
+    server.auth_headers.clear()
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "reconfigure", "entry_id": entry.entry_id}
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"url": other})
+    assert result["errors"] == {"base": "api_key_for_new_server"}
+    assert server.auth_headers == [None]
+    # A wrong key typed in is a plain auth error.
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": other, "api_key": "wrong"}
+    )
+    assert result["errors"] == {"base": "invalid_auth"}
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": other, "api_key": "proxy-token"}
+    )
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == {"url": normalize_url(other), "api_key": "proxy-token"}
+    await hass.async_block_till_done()
+
+    # A server that needs no key: the blank field stores none.
+    server.api_key = None
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "reconfigure", "entry_id": entry.entry_id}
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"url": url})
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == {"url": normalize_url(url)}
+    await hass.async_block_till_done()
+    await test_server.close()
+
+
+async def test_reauth(hass: HomeAssistant, fake) -> None:
+    """A rejected key at setup starts reauth; a new valid key reloads the entry."""
+    server, url = fake
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": url, "api_key": "old-token"}
+    )
+    entry = result["result"]
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    # The proxy now wants another key: setup fails with an auth error.
+    server.api_key = "new-token"
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    flows = entry.async_get_active_flows(hass, {"reauth"})
+    flow = next(flows)
+    result = await hass.config_entries.flow.async_configure(flow["flow_id"])
+    assert result["step_id"] == "reauth_confirm"
+    assert "old-token" not in str(result)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"api_key": "wrong"}
+    )
+    assert result["errors"] == {"base": "invalid_auth"}
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"api_key": "new-token"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert "translation_domain" not in result
+    assert entry.data == {"url": normalize_url(url), "api_key": "new-token"}
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    # Started by hand on a loaded entry, the update listener does the reload.
+    server.api_key = "third-token"
+    entry.async_start_reauth(hass)
+    await hass.async_block_till_done()
+    flow = next(entry.async_get_active_flows(hass, {"reauth"}))
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {"api_key": "third-token"}
+    )
+    assert result["reason"] == "reauth_successful"
+    await hass.async_block_till_done()
+    assert entry.data["api_key"] == "third-token"
+    assert entry.state is ConfigEntryState.LOADED
+
+
 async def test_streaming_tts(hass: HomeAssistant, fake) -> None:
     server, url = fake
     entry = await _add_server(hass, url)
@@ -162,6 +260,7 @@ async def test_streaming_tts(hass: HomeAssistant, fake) -> None:
 
     entity = _entity(hass, tts.DATA_COMPONENT, "tts", sub.subentry_id)
     assert entity.async_supports_streaming_input()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert [v.voice_id for v in entity.async_get_supported_voices("en")] == ["kitt_eng", "alba"]
 
     server.speech_requests.clear()
@@ -190,6 +289,74 @@ async def test_streaming_tts(hass: HomeAssistant, fake) -> None:
     extension, data = await entity.async_get_tts_audio("Short test sentence here.", "en", {})
     with wave.open(io.BytesIO(data), "rb") as reader:
         assert reader.getnframes() == len("Short test sentence here.")
+
+
+async def test_voices_load_in_background(hass: HomeAssistant, fake) -> None:
+    """A slow voice listing does not hold up setup; a failed one lists no voices."""
+    server, url = fake
+    entry = await _add_server(hass, url)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "tts"), context={"source": "user"}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"model": "kokoro"}
+    )
+    # Hold the listing only from here on: the settings form has its own.
+    server.voices_gate = asyncio.Event()
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Kokoro", "languages": ["en"], "voice": "alba"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    await hass.async_block_till_done()
+    entity = _entity(hass, tts.DATA_COMPONENT, "tts", _subentry(entry, "tts").subentry_id)
+    # The engine is up while the listing is still pending, and still takes a voice.
+    assert hass.states.get(entity.entity_id) is not None
+    assert entity.async_get_supported_voices("en") is None
+    assert entity.supported_options == ["voice"]
+    assert entity.default_options == {"voice": "alba"}
+
+    server.voices_gate.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert [v.voice_id for v in entity.async_get_supported_voices("en")] == ["kitt_eng", "alba"]
+
+    # After a failed listing (here on reload) there are simply no voices.
+    server.voices_fail = True
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    entity = _entity(hass, tts.DATA_COMPONENT, "tts", _subentry(entry, "tts").subentry_id)
+    assert entity.async_get_supported_voices("en") is None
+    extension, data = await entity.async_get_tts_audio("Hello there, voice test.", "en", {})
+    assert extension == "wav" and server.speech_requests[-1]["voice"] == "alba"
+
+
+async def test_stream_closed_when_reader_stops(hass: HomeAssistant, fake) -> None:
+    """Stopping early closes the server stream at once, not on garbage collection."""
+    _, url = fake
+    entry = await _add_server(hass, url)
+    await _add_engine(
+        hass, entry, "tts", "kitt-en",
+        {"name": "KITT English", "languages": ["en"], "streaming": True,
+         "split_sentences": False},
+    )
+    entity = _entity(hass, tts.DATA_COMPONENT, "tts", _subentry(entry, "tts").subentry_id)
+    closed = []
+
+    async def synthesize_stream(model, text, **kwargs):
+        try:
+            yield b"\x01\x00"
+            yield b"\x02\x00"
+        finally:
+            closed.append(True)
+
+    entity.client = type("Client", (), {"synthesize_stream": staticmethod(synthesize_stream)})()
+    response = await entity.async_stream_tts_audio(
+        TTSAudioRequest(language="en", options={}, message_gen=_text("Some text to say."))
+    )
+    data_gen = response.data_gen
+    await anext(data_gen)  # WAV header
+    await anext(data_gen)  # first PCM chunk
+    await data_gen.aclose()
+    assert closed == [True]
 
 
 async def test_offline_tts_and_probe_error(hass: HomeAssistant, fake) -> None:
@@ -288,6 +455,51 @@ async def test_extra_options_checked(hass: HomeAssistant, fake) -> None:
     # Saving again unchanged keeps them: the model may take undeclared options.
     result = await hass.config_entries.subentries.async_configure(result["flow_id"], settings)
     assert result["type"] is FlowResultType.CREATE_ENTRY, result
+
+
+def _suggested(result) -> dict:
+    return {
+        str(key): key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if key.description and "suggested_value" in key.description
+    }
+
+
+async def test_cleared_fields_stay_cleared_after_error(hass: HomeAssistant, fake) -> None:
+    server, url = fake
+    entry = await _add_server(hass, url)
+    # An STT prompt the user clears.
+    settings = {"name": "Parakeet", "languages": ["not a tag"], "language_hint": "none", "prompt": "KITT"}
+    result = await _add_engine(hass, entry, "stt", "parakeet", settings)
+    assert result["errors"] == {"languages": "invalid_languages"}
+    settings.pop("prompt")
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], settings)
+    assert result["errors"] == {"languages": "invalid_languages"}
+    assert "prompt" not in _suggested(result)
+
+    # TTS voice, speed and extra options the user clears.
+    settings = {
+        "name": "Kokoro", "languages": ["not a tag"], "split_sentences": True,
+        "voice": "alba", "speed": 1.5, "extra_options": {"seed": 7},
+    }
+    result = await _add_engine(hass, entry, "tts", "kokoro", settings)
+    assert result["errors"] == {"languages": "invalid_languages"}
+    assert _suggested(result)["extra_options"] == {"seed": 7}
+
+    # The user clears the optional fields, but the languages are still wrong.
+    for key in ("voice", "speed", "extra_options"):
+        settings.pop(key)
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], settings)
+    assert result["errors"] == {"languages": "invalid_languages"}
+    suggested = _suggested(result)
+    assert not {"voice", "speed", "extra_options"} & suggested.keys(), suggested
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**settings, "languages": ["en"]}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    data = _subentry(entry, "tts").data
+    assert not {"voice", "speed", "extra_options"} & data.keys(), data
 
 
 async def test_repair_issue_for_stale_options(hass: HomeAssistant, fake) -> None:

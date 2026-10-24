@@ -29,6 +29,7 @@ Copy `custom_components/audiocpp` into your Home Assistant `config/custom_compon
 1. **Settings → Devices & services → Add integration → audio.cpp.**
 2. Enter the server URL, for example `http://192.168.1.10:8080`. An OpenAI-style URL ending in `/v1` works too.
    - **API key:** audio.cpp has no authentication of its own. Fill this in only if a reverse proxy in front of the server expects a Bearer token.
+     If the proxy later rejects the key, Home Assistant asks for a new one. Reconfiguring the server to a different host or port does not carry the key over: enter it again if the new server needs one.
 3. On the new server entry, choose **Add TTS engine** or **Add STT engine**. Each engine is bound to one model on the server, and you can add as many as you like.
 4. Pick the engines in **Settings → Voice assistants** for your Assist pipeline.
 

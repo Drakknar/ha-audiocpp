@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any, override
 from urllib.parse import urlsplit
 
@@ -98,25 +99,52 @@ SERVER_SCHEMA = vol.Schema(
 )
 
 
+def _host_port(url: str) -> tuple[str | None, int | None]:
+    """Return the host and port of a URL, with the scheme's default port."""
+    parts = urlsplit(url)
+    port = parts.port or {"http": 80, "https": 443}.get(parts.scheme)
+    return (parts.hostname or "").lower() or None, port
+
+
+REAUTH_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_API_KEY): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        ),
+    }
+)
+
+
 async def _validate_server(
-    flow: ConfigFlow, user_input: dict[str, Any], current_key: str | None = None
+    flow: ConfigFlow,
+    user_input: dict[str, Any],
+    current_key: str | None = None,
+    current_url: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Check a server; return the data to store and any form errors.
 
     A blank API key keeps ``current_key``: the reconfigure form does not
-    send the stored secret back to the browser to pre-fill it.
+    send the stored secret back to the browser to pre-fill it. The key is
+    kept only while host and port stay those of ``current_url``, so it is
+    never sent to a different server.
     """
     try:
         url = normalize_url(user_input[CONF_URL])
     except ValueError:
         return {}, {CONF_URL: "invalid_url"}
     data: dict[str, Any] = {CONF_URL: url}
+    key_dropped = False
+    if current_key and current_url and _host_port(url) != _host_port(current_url):
+        key_dropped = True
+        current_key = None
     if api_key := user_input.get(CONF_API_KEY) or current_key:
         data[CONF_API_KEY] = api_key
     client = AudioCppClient(async_get_clientsession(flow.hass), url, api_key)
     try:
         await client.health()
     except AudioCppAuthError:
+        if key_dropped and not api_key:
+            return data, {"base": "api_key_for_new_server"}
         return data, {"base": "invalid_auth"}
     except AudioCppConnectionError:
         return data, {"base": "cannot_connect"}
@@ -162,7 +190,7 @@ class AudioCppConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             data, errors = await _validate_server(
-                self, user_input, entry.data.get(CONF_API_KEY)
+                self, user_input, entry.data.get(CONF_API_KEY), entry.data[CONF_URL]
             )
             if not errors:
                 if data[CONF_URL] != entry.data[CONF_URL]:
@@ -181,6 +209,40 @@ class AudioCppConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self.add_suggested_values_to_schema(
                 SERVER_SCHEMA, user_input or {CONF_URL: entry.data[CONF_URL]}
             ),
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Start when the server (its proxy) rejects the stored API key."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for a new API key and check it against the server."""
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            data, errors = await _validate_server(
+                self,
+                {CONF_URL: entry.data[CONF_URL], CONF_API_KEY: user_input[CONF_API_KEY]},
+            )
+            if not errors:
+                # An explicit reason keeps our own wording (see reconfigure).
+                if entry.update_listeners:
+                    # Loaded: the update listener reloads it.
+                    return self.async_update_and_abort(
+                        entry, data=data, reason="reauth_successful"
+                    )
+                return self.async_update_reload_and_abort(
+                    entry, data=data, reason="reauth_successful"
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=REAUTH_SCHEMA,
+            description_placeholders={"url": entry.data[CONF_URL]},
             errors=errors,
         )
 
@@ -304,6 +366,15 @@ class _EngineSubentryFlow(ConfigSubentryFlow):
             return "invalid_languages"
         return None
 
+    def _keep_input(self, user_input: dict[str, Any]) -> None:
+        """Keep the submitted settings to show them again with an error.
+
+        A cleared optional field (voice, speed, extra options, prompt) is
+        missing from ``user_input``, so the earlier value must not be kept
+        either: the form would offer it again and the next save store it.
+        """
+        self._data = {CONF_MODEL: self._data[CONF_MODEL], **user_input}
+
     def _finish(self, data: dict[str, Any]) -> SubentryFlowResult:
         title = data.pop(CONF_NAME)
         if self.source == "user":
@@ -357,7 +428,7 @@ class TTSSubentryFlow(_EngineSubentryFlow):
                     return self._finish(data)
                 errors["base"] = "probe_failed"
                 placeholders["error"] = error_text
-            self._data.update(user_input)
+            self._keep_input(user_input)
 
         return self.async_show_form(
             step_id="settings",
@@ -490,7 +561,7 @@ class STTSubentryFlow(_EngineSubentryFlow):
                 errors[CONF_LANGUAGES] = error
             else:
                 return self._finish(data)
-            self._data.update(user_input)
+            self._keep_input(user_input)
 
         model = self._model
         fields: dict[Any, Any] = {
