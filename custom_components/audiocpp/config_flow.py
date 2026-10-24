@@ -304,6 +304,15 @@ class _EngineSubentryFlow(ConfigSubentryFlow):
             return "invalid_languages"
         return None
 
+    def _keep_input(self, user_input: dict[str, Any]) -> None:
+        """Keep the submitted settings to show them again with an error.
+
+        A cleared optional field (voice, speed, extra options, prompt) is
+        missing from ``user_input``, so the earlier value must not be kept
+        either: the form would offer it again and the next save store it.
+        """
+        self._data = {CONF_MODEL: self._data[CONF_MODEL], **user_input}
+
     def _finish(self, data: dict[str, Any]) -> SubentryFlowResult:
         title = data.pop(CONF_NAME)
         if self.source == "user":
@@ -357,7 +366,7 @@ class TTSSubentryFlow(_EngineSubentryFlow):
                     return self._finish(data)
                 errors["base"] = "probe_failed"
                 placeholders["error"] = error_text
-            self._data.update(user_input)
+            self._keep_input(user_input)
 
         return self.async_show_form(
             step_id="settings",
@@ -490,7 +499,7 @@ class STTSubentryFlow(_EngineSubentryFlow):
                 errors[CONF_LANGUAGES] = error
             else:
                 return self._finish(data)
-            self._data.update(user_input)
+            self._keep_input(user_input)
 
         model = self._model
         fields: dict[Any, Any] = {

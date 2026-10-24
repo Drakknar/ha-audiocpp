@@ -290,6 +290,51 @@ async def test_extra_options_checked(hass: HomeAssistant, fake) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY, result
 
 
+def _suggested(result) -> dict:
+    return {
+        str(key): key.description["suggested_value"]
+        for key in result["data_schema"].schema
+        if key.description and "suggested_value" in key.description
+    }
+
+
+async def test_cleared_fields_stay_cleared_after_error(hass: HomeAssistant, fake) -> None:
+    server, url = fake
+    entry = await _add_server(hass, url)
+    # An STT prompt the user clears.
+    settings = {"name": "Parakeet", "languages": ["not a tag"], "language_hint": "none", "prompt": "KITT"}
+    result = await _add_engine(hass, entry, "stt", "parakeet", settings)
+    assert result["errors"] == {"languages": "invalid_languages"}
+    settings.pop("prompt")
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], settings)
+    assert result["errors"] == {"languages": "invalid_languages"}
+    assert "prompt" not in _suggested(result)
+
+    # TTS voice, speed and extra options the user clears.
+    settings = {
+        "name": "Kokoro", "languages": ["not a tag"], "split_sentences": True,
+        "voice": "alba", "speed": 1.5, "extra_options": {"seed": 7},
+    }
+    result = await _add_engine(hass, entry, "tts", "kokoro", settings)
+    assert result["errors"] == {"languages": "invalid_languages"}
+    assert _suggested(result)["extra_options"] == {"seed": 7}
+
+    # The user clears the optional fields, but the languages are still wrong.
+    for key in ("voice", "speed", "extra_options"):
+        settings.pop(key)
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], settings)
+    assert result["errors"] == {"languages": "invalid_languages"}
+    suggested = _suggested(result)
+    assert not {"voice", "speed", "extra_options"} & suggested.keys(), suggested
+
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**settings, "languages": ["en"]}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    data = _subentry(entry, "tts").data
+    assert not {"voice", "speed", "extra_options"} & data.keys(), data
+
+
 async def test_repair_issue_for_stale_options(hass: HomeAssistant, fake) -> None:
     server, url = fake
     entry = await _add_server(hass, url)
