@@ -148,6 +148,53 @@ async def test_reconfigure_keeps_api_key(hass: HomeAssistant, fake) -> None:
     assert entry.data["api_key"] == "proxy-token"
 
 
+async def test_reconfigure_to_other_server_drops_api_key(hass: HomeAssistant, fake) -> None:
+    """The stored key is never sent to a different host or port."""
+    _, url = fake
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": url, "api_key": "proxy-token"}
+    )
+    entry = result["result"]
+    await hass.async_block_till_done()
+    # A second server on the same host, but another port.
+    server = FakeAudioCpp()
+    test_server = TestServer(server.app, host="127.0.0.1")
+    await test_server.start_server()
+    other = str(test_server.make_url("/"))
+
+    server.api_key = "proxy-token"
+    server.auth_headers.clear()
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "reconfigure", "entry_id": entry.entry_id}
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"url": other})
+    assert result["errors"] == {"base": "api_key_for_new_server"}
+    assert server.auth_headers == [None]
+    # A wrong key typed in is a plain auth error.
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": other, "api_key": "wrong"}
+    )
+    assert result["errors"] == {"base": "invalid_auth"}
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url": other, "api_key": "proxy-token"}
+    )
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == {"url": normalize_url(other), "api_key": "proxy-token"}
+    await hass.async_block_till_done()
+
+    # A server that needs no key: the blank field stores none.
+    server.api_key = None
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "reconfigure", "entry_id": entry.entry_id}
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"url": url})
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data == {"url": normalize_url(url)}
+    await hass.async_block_till_done()
+    await test_server.close()
+
+
 async def test_streaming_tts(hass: HomeAssistant, fake) -> None:
     server, url = fake
     entry = await _add_server(hass, url)

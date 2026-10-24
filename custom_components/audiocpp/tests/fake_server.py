@@ -76,13 +76,24 @@ class FakeAudioCpp:
         # Set to hold /v1/audio/voices until the event is set.
         self.voices_gate: asyncio.Event | None = None
         self.voices_fail = False
-        self.app = web.Application()
+        # Set to answer 401 unless this Bearer token is sent, like a proxy.
+        self.api_key: str | None = None
+        self.auth_headers: list[str | None] = []
+        self.app = web.Application(middlewares=[self._auth])
         self.app.router.add_get("/health", self.health)
         self.app.router.add_get("/v1/models", self.models)
         self.app.router.add_get("/v1/audio/voices", self.voices)
         self.app.router.add_post("/v1/audio/speech", self.speech)
         self.app.router.add_post("/v1/audio/transcriptions", self.transcribe)
         self.app.router.add_post("/v1/audio/transcriptions/live", self.transcribe_live)
+
+    @web.middleware
+    async def _auth(self, request: web.Request, handler):
+        header = request.headers.get("Authorization")
+        self.auth_headers.append(header)
+        if self.api_key is not None and header != f"Bearer {self.api_key}":
+            return _error(401, "unauthorized")
+        return await handler(request)
 
     async def health(self, request: web.Request) -> web.Response:
         return web.json_response({"status": "ok", "backend": "cpu", "models": len(MODELS)})

@@ -98,25 +98,43 @@ SERVER_SCHEMA = vol.Schema(
 )
 
 
+def _host_port(url: str) -> tuple[str | None, int | None]:
+    """Return the host and port of a URL, with the scheme's default port."""
+    parts = urlsplit(url)
+    port = parts.port or {"http": 80, "https": 443}.get(parts.scheme)
+    return (parts.hostname or "").lower() or None, port
+
+
 async def _validate_server(
-    flow: ConfigFlow, user_input: dict[str, Any], current_key: str | None = None
+    flow: ConfigFlow,
+    user_input: dict[str, Any],
+    current_key: str | None = None,
+    current_url: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Check a server; return the data to store and any form errors.
 
     A blank API key keeps ``current_key``: the reconfigure form does not
-    send the stored secret back to the browser to pre-fill it.
+    send the stored secret back to the browser to pre-fill it. The key is
+    kept only while host and port stay those of ``current_url``, so it is
+    never sent to a different server.
     """
     try:
         url = normalize_url(user_input[CONF_URL])
     except ValueError:
         return {}, {CONF_URL: "invalid_url"}
     data: dict[str, Any] = {CONF_URL: url}
+    key_dropped = False
+    if current_key and current_url and _host_port(url) != _host_port(current_url):
+        key_dropped = True
+        current_key = None
     if api_key := user_input.get(CONF_API_KEY) or current_key:
         data[CONF_API_KEY] = api_key
     client = AudioCppClient(async_get_clientsession(flow.hass), url, api_key)
     try:
         await client.health()
     except AudioCppAuthError:
+        if key_dropped and not api_key:
+            return data, {"base": "api_key_for_new_server"}
         return data, {"base": "invalid_auth"}
     except AudioCppConnectionError:
         return data, {"base": "cannot_connect"}
@@ -162,7 +180,7 @@ class AudioCppConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             data, errors = await _validate_server(
-                self, user_input, entry.data.get(CONF_API_KEY)
+                self, user_input, entry.data.get(CONF_API_KEY), entry.data[CONF_URL]
             )
             if not errors:
                 if data[CONF_URL] != entry.data[CONF_URL]:
