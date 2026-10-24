@@ -105,6 +105,7 @@ def _host_port(url: str) -> tuple[str | None, int | None]:
     port = parts.port or {"http": 80, "https": 443}.get(parts.scheme)
     return (parts.hostname or "").lower() or None, port
 
+
 REAUTH_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_API_KEY): TextSelector(
