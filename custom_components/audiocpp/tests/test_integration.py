@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 import io
 import shutil
@@ -162,6 +163,7 @@ async def test_streaming_tts(hass: HomeAssistant, fake) -> None:
 
     entity = _entity(hass, tts.DATA_COMPONENT, "tts", sub.subentry_id)
     assert entity.async_supports_streaming_input()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert [v.voice_id for v in entity.async_get_supported_voices("en")] == ["kitt_eng", "alba"]
 
     server.speech_requests.clear()
@@ -190,6 +192,44 @@ async def test_streaming_tts(hass: HomeAssistant, fake) -> None:
     extension, data = await entity.async_get_tts_audio("Short test sentence here.", "en", {})
     with wave.open(io.BytesIO(data), "rb") as reader:
         assert reader.getnframes() == len("Short test sentence here.")
+
+
+async def test_voices_load_in_background(hass: HomeAssistant, fake) -> None:
+    """A slow voice listing does not hold up setup; a failed one lists no voices."""
+    server, url = fake
+    entry = await _add_server(hass, url)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "tts"), context={"source": "user"}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"model": "kokoro"}
+    )
+    # Hold the listing only from here on: the settings form has its own.
+    server.voices_gate = asyncio.Event()
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"name": "Kokoro", "languages": ["en"], "voice": "alba"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    await hass.async_block_till_done()
+    entity = _entity(hass, tts.DATA_COMPONENT, "tts", _subentry(entry, "tts").subentry_id)
+    # The engine is up while the listing is still pending, and still takes a voice.
+    assert hass.states.get(entity.entity_id) is not None
+    assert entity.async_get_supported_voices("en") is None
+    assert entity.supported_options == ["voice"]
+    assert entity.default_options == {"voice": "alba"}
+
+    server.voices_gate.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert [v.voice_id for v in entity.async_get_supported_voices("en")] == ["kitt_eng", "alba"]
+
+    # After a failed listing (here on reload) there are simply no voices.
+    server.voices_fail = True
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    entity = _entity(hass, tts.DATA_COMPONENT, "tts", _subentry(entry, "tts").subentry_id)
+    assert entity.async_get_supported_voices("en") is None
+    extension, data = await entity.async_get_tts_audio("Hello there, voice test.", "en", {})
+    assert extension == "wav" and server.speech_requests[-1]["voice"] == "alba"
 
 
 async def test_stream_closed_when_reader_stops(hass: HomeAssistant, fake) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import copy
 import io
@@ -72,6 +73,9 @@ class FakeAudioCpp:
         self.live: list[dict] = []
         # None acts as a server before v0.9.1, which reports no params.
         self.params: dict[str, list[dict]] | None = copy.deepcopy(PARAMS)
+        # Set to hold /v1/audio/voices until the event is set.
+        self.voices_gate: asyncio.Event | None = None
+        self.voices_fail = False
         self.app = web.Application()
         self.app.router.add_get("/health", self.health)
         self.app.router.add_get("/v1/models", self.models)
@@ -91,6 +95,10 @@ class FakeAudioCpp:
         return web.json_response({"object": "list", "data": data})
 
     async def voices(self, request: web.Request) -> web.Response:
+        if self.voices_gate is not None:
+            await self.voices_gate.wait()
+        if self.voices_fail:
+            return _error(500, "voices unavailable")
         return web.json_response({"voices": ["kitt_eng", "alba"]})
 
     async def speech(self, request: web.Request) -> web.StreamResponse:

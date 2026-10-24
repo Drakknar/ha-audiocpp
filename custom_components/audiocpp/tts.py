@@ -129,8 +129,19 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
 
     @override
     async def async_added_to_hass(self) -> None:
-        """Load the voice list once; the server's voices change only on restart."""
+        """Start loading the voice list; the server's voices change only on restart.
+
+        The listing can take up to the connect timeout, so it runs in the
+        background instead of holding up the platform setup. Until it ends,
+        or if it fails, no voices are listed; a voice can still be passed as
+        an option, since the server decides whether it exists.
+        """
         await super().async_added_to_hass()
+        self.entry.async_create_background_task(
+            self.hass, self._async_load_voices(), f"audiocpp voices {self.model}"
+        )
+
+    async def _async_load_voices(self) -> None:
         try:
             voices = await self.client.voices(self.model)
         except AudioCppError as err:
