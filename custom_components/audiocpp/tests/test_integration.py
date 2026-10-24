@@ -192,6 +192,36 @@ async def test_streaming_tts(hass: HomeAssistant, fake) -> None:
         assert reader.getnframes() == len("Short test sentence here.")
 
 
+async def test_stream_closed_when_reader_stops(hass: HomeAssistant, fake) -> None:
+    """Stopping early closes the server stream at once, not on garbage collection."""
+    _, url = fake
+    entry = await _add_server(hass, url)
+    await _add_engine(
+        hass, entry, "tts", "kitt-en",
+        {"name": "KITT English", "languages": ["en"], "streaming": True,
+         "split_sentences": False},
+    )
+    entity = _entity(hass, tts.DATA_COMPONENT, "tts", _subentry(entry, "tts").subentry_id)
+    closed = []
+
+    async def synthesize_stream(model, text, **kwargs):
+        try:
+            yield b"\x01\x00"
+            yield b"\x02\x00"
+        finally:
+            closed.append(True)
+
+    entity.client = type("Client", (), {"synthesize_stream": staticmethod(synthesize_stream)})()
+    response = await entity.async_stream_tts_audio(
+        TTSAudioRequest(language="en", options={}, message_gen=_text("Some text to say."))
+    )
+    data_gen = response.data_gen
+    await anext(data_gen)  # WAV header
+    await anext(data_gen)  # first PCM chunk
+    await data_gen.aclose()
+    assert closed == [True]
+
+
 async def test_offline_tts_and_probe_error(hass: HomeAssistant, fake) -> None:
     server, url = fake
     # A server before v0.9.1 does not say which models take speed, so the
