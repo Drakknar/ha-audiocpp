@@ -175,7 +175,8 @@ cd custom_components/audiocpp && pytest
 ## Upstream watch
 
 `.github/workflows/compat-review.yml` runs daily. For each new version of a dependency, Claude reviews this integration once, following `.github/prompts/ha-compat.md`.
-- **Home Assistant** reviews start at the first beta of each minor release. Each audio.cpp release is reviewed too, against the API notes above.
+- **Home Assistant:** every stable release is reviewed, patch releases included, and so is the first beta of each minor release.
+- **audio.cpp:** each published release is reviewed against the API notes above. Commits to its default branch are not reviewed until a release ships them.
 - **Results:** a fix comes as a pull request; anything that needs the owner, as an issue labelled `upstream-watch` and assigned to the owner; new features worth using, as an `enhancement` issue.
 - **Access:** Claude works with read-only access (secret `CLAUDE_CODE_OAUTH_TOKEN`). A separate job opens the pull request and issues.
 - **Isolation (tested 2026-10-11):**
