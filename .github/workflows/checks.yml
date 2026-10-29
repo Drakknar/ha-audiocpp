@@ -1,0 +1,49 @@
+name: Checks
+
+# Runs on every pull request (Dependabot's included) and on pushes to main:
+# the pytest suite in custom_components/audiocpp/tests (against its fake
+# audio.cpp server) on Home Assistant's test harness, and actionlint on the
+# workflows themselves.
+# Not a required check yet: pull requests opened by the Compatibility review
+# use GITHUB_TOKEN, which doesn't trigger this workflow.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 0.13.373 = Home Assistant 2026.10.2.
+  HARNESS: pytest-homeassistant-custom-component==0.13.373
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+
+      - name: Install the test harness
+        # mutagen and ha-ffmpeg: needed by the tts and stt platforms.
+        run: |
+          uv venv -p 3.14 "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "$HARNESS" mutagen ha-ffmpeg
+
+      - name: pytest
+        working-directory: custom_components/audiocpp
+        run: python -m pytest
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
