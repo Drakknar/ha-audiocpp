@@ -1,7 +1,7 @@
 name: Compatibility review
 
 # Daily check for new versions of what this repository depends on:
-# Home Assistant core (stable releases incl. patches, and new betas) and the
+# Home Assistant core (stable releases incl. patches, never betas) and the
 # audio.cpp server (published releases only, never branch commits).
 # Each new version is reviewed once by Claude: nothing to do opens nothing (the
 # report is in the run summary), a fix comes as a pull request, anything that
@@ -54,17 +54,13 @@ jobs:
           keys=()
           subjects=()
 
-          # Home Assistant, two tracks:
-          # - every stable release, patch releases included (ha:<tag>), compared
-          #   with the last stable one reviewed (ha:stable). An X.Y.0 whose beta
-          #   was reviewed is compared with that beta instead.
-          # - the first beta of a new minor release (ha:<minor>), compared with
-          #   the last stable one, so a breaking change shows up before the
-          #   release reaches you.
+          # Home Assistant: every stable release, patch releases included
+          # (ha:<tag>), compared with the last stable one reviewed (ha:stable).
+          # Betas are not reviewed (the owner's choice, 2026-10-30). An X.Y.0
+          # whose beta was reviewed before that is compared with that beta.
           tags=$(gh api "repos/home-assistant/core/releases?per_page=50" --jq '.[].tag_name' \
-            | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+(b[0-9]+)?$')
-          stable=$(grep -v b <<<"$tags" | sort -V | tail -n1)
-          minor=$(sort -V <<<"$tags" | tail -n1 | cut -d. -f1,2)
+            | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+$')
+          stable=$(sort -V <<<"$tags" | tail -n1)
           last_stable=$(w get ha:stable)
           last_stable=${last_stable:-$(w get ha:last)}
           last_stable=${last_stable:-$(jq -r .homeassistant hacs.json)}
@@ -90,23 +86,6 @@ jobs:
 
           CTX
             fi
-          fi
-
-          # The newest minor has no stable release yet: review its newest beta.
-          minor_stable=$(grep -v b <<<"$tags" | grep "^$minor\." || true)
-          if [ -z "$minor_stable" ] && due "ha:$minor"; then
-            beta=$(grep "^$minor\." <<<"$tags" | sort -V | tail -n1)
-            prev=$(w get "ha:from:$minor")
-            prev=${prev:-$stable}
-            keys+=("ha:$minor=@" "ha:from:$minor=$prev" "ha:beta:$minor=$beta")
-            subjects+=("Home Assistant $beta")
-            cat >> "$ctx" <<CTX
-          ## Home Assistant core (beta)
-          - Last reviewed: $prev. New: $beta. This is a beta; the final release follows about a week later.
-          - Source: https://github.com/home-assistant/core/compare/$prev...$beta
-          - Frontend version each release ships: homeassistant/components/frontend/manifest.json at that tag.
-
-          CTX
           fi
 
           # audio.cpp: each published release. Commits to its default branch
