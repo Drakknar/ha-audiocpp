@@ -4,8 +4,6 @@ One config entry is one audio.cpp server. Each TTS or STT engine is a
 config subentry of it, bound to one model on that server.
 """
 
-from __future__ import annotations
-
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -68,7 +66,10 @@ async def _async_check_engine_options(
         subentry
         for subentry in entry.subentries.values()
         if subentry.subentry_type == SUBENTRY_TTS
-        and (subentry.data.get(CONF_SPEED) is not None or subentry.data.get(CONF_EXTRA_OPTIONS))
+        and (
+            subentry.data.get(CONF_SPEED) is not None
+            or subentry.data.get(CONF_EXTRA_OPTIONS)
+        )
     ]
     models: dict[str, ModelInfo] = {}
     if engines:
@@ -112,7 +113,11 @@ def _async_delete_issues(
 ) -> None:
     prefix = _issue_prefix(entry)
     for domain, issue_id in list(ir.async_get(hass).issues):
-        if domain == DOMAIN and issue_id.startswith(prefix) and issue_id not in (keep or ()):
+        if (
+            domain == DOMAIN
+            and issue_id.startswith(prefix)
+            and issue_id not in (keep or ())
+        ):
             ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 

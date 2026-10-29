@@ -6,11 +6,9 @@ for a model the server runs in streaming mode, whether to use the
 streaming endpoints.
 """
 
-from __future__ import annotations
-
+from collections.abc import Mapping
 import logging
 import re
-from collections.abc import Mapping
 from typing import Any, override
 from urllib.parse import urlsplit
 
@@ -24,7 +22,13 @@ from homeassistant.config_entries import (
     ConfigSubentryFlow,
     SubentryFlowResult,
 )
-from homeassistant.const import CONF_API_KEY, CONF_MODEL, CONF_NAME, CONF_PROMPT, CONF_URL
+from homeassistant.const import (
+    CONF_API_KEY,
+    CONF_MODEL,
+    CONF_NAME,
+    CONF_PROMPT,
+    CONF_URL,
+)
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
@@ -227,7 +231,10 @@ class AudioCppConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             data, errors = await _validate_server(
                 self,
-                {CONF_URL: entry.data[CONF_URL], CONF_API_KEY: user_input[CONF_API_KEY]},
+                {
+                    CONF_URL: entry.data[CONF_URL],
+                    CONF_API_KEY: user_input[CONF_API_KEY],
+                },
             )
             if not errors:
                 # An explicit reason keeps our own wording (see reconfigure).
@@ -324,7 +331,9 @@ class _EngineSubentryFlow(ConfigSubentryFlow):
         ]
         if not options and not errors:
             errors["base"] = "no_models"
-        default = self._data.get(CONF_MODEL) or (options[0]["value"] if options else None)
+        default = self._data.get(CONF_MODEL) or (
+            options[0]["value"] if options else None
+        )
         schema = vol.Schema(
             {
                 vol.Required(CONF_MODEL, default=default)
@@ -509,7 +518,11 @@ class TTSSubentryFlow(_EngineSubentryFlow):
         if (param := model.speed_param) is None:
             return None
         low = param.min if param.min is not None and param.min > 0 else SPEED_MIN
-        high = param.max if param.max is not None and param.max > low else max(SPEED_MAX, low)
+        high = (
+            param.max
+            if param.max is not None and param.max > low
+            else max(SPEED_MAX, low)
+        )
         return low, high
 
     def _check_options(self, data: dict[str, Any]) -> list[str]:

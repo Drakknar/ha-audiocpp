@@ -7,8 +7,6 @@ option renamed by a server upgrade (v0.9.2 renamed many) when the engine is
 saved or set up, instead of when Assist next speaks.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 import difflib
 from typing import Any
@@ -103,7 +101,8 @@ def check_speech_options(
                 problems.append("`options` must be a mapping of option names to values")
                 continue
             problems.extend(
-                _check_option(name, option, name, model) for name, option in value.items()
+                _check_option(name, option, name, model)
+                for name, option in value.items()
             )
         elif key in _SPEED_FIELDS:
             problems.append(_check_speed(key, value, model))
