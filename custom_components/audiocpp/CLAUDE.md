@@ -98,7 +98,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
   - `async_update_reload_and_abort` with an update listener logs a deprecation warning that becomes breaking in 2026.12.
 - **Abort wording (2026.10):** `async_update_and_abort` without `reason` now aborts with `translation_domain="homeassistant"`, so HA's generic "reconfigure successful" text replaces ours ([#180723](https://github.com/home-assistant/core/pull/180723), [#181225](https://github.com/home-assistant/core/pull/181225)).
   - The server flow passes `reason="reconfigure_successful"` (and `"reauth_successful"`) explicitly, which keeps `strings.json`.
-  - The subentry `async_update_and_abort` only gained `reason` in 2026.10, so the subentry flows call `async_update_subentry` and `async_abort` themselves to stay compatible with 2026.9.
+  - The engine subentry flows do the same with the subentry `async_update_and_abort`, whose `reason` argument is new in 2026.10 (the minimum since 2026-10-30).
 - **Validation:** core moved to probatio in 2026.10 and bans voluptuous; the config flow imports `probatio` directly, as core does (since 2026-10-30; `.ruff.toml` bans voluptuous too). `import voluptuous as vol` would still work, aliased to probatio's shim.
 - **`LanguageSelector`:** single choice only. Languages therefore use `SelectSelector(multiple=True, custom_value=True)`, validated with a BCP-47-like regex.
 - **References:** `homeassistant/components/openai_conversation` (`stt.py`, `tts.py`, `config_flow.py`) is the closest in-tree example of TTS/STT subentries.
