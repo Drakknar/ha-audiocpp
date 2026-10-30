@@ -12,7 +12,7 @@ import re
 from typing import Any, override
 from urllib.parse import urlsplit
 
-import voluptuous as vol
+import probatio
 
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -91,12 +91,12 @@ COMMON_LANGUAGES = [
 ]  # fmt: skip
 _LANGUAGE_TAG = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
 
-SERVER_SCHEMA = vol.Schema(
+SERVER_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_URL): TextSelector(
+        probatio.Required(CONF_URL): TextSelector(
             TextSelectorConfig(type=TextSelectorType.URL)
         ),
-        vol.Optional(CONF_API_KEY): TextSelector(
+        probatio.Optional(CONF_API_KEY): TextSelector(
             TextSelectorConfig(type=TextSelectorType.PASSWORD)
         ),
     }
@@ -110,9 +110,9 @@ def _host_port(url: str) -> tuple[str | None, int | None]:
     return (parts.hostname or "").lower() or None, port
 
 
-REAUTH_SCHEMA = vol.Schema(
+REAUTH_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_API_KEY): TextSelector(
+        probatio.Required(CONF_API_KEY): TextSelector(
             TextSelectorConfig(type=TextSelectorType.PASSWORD)
         ),
     }
@@ -334,11 +334,11 @@ class _EngineSubentryFlow(ConfigSubentryFlow):
         default = self._data.get(CONF_MODEL) or (
             options[0]["value"] if options else None
         )
-        schema = vol.Schema(
+        schema = probatio.Schema(
             {
-                vol.Required(CONF_MODEL, default=default)
+                probatio.Required(CONF_MODEL, default=default)
                 if default
-                else vol.Required(CONF_MODEL): SelectSelector(
+                else probatio.Required(CONF_MODEL): SelectSelector(
                     SelectSelectorConfig(
                         options=options,
                         custom_value=True,
@@ -359,7 +359,7 @@ class _EngineSubentryFlow(ConfigSubentryFlow):
         default = self._data.get(CONF_LANGUAGES) or [self.hass.config.language]
         options = list(dict.fromkeys([*default, *COMMON_LANGUAGES]))
         return {
-            vol.Required(CONF_LANGUAGES, default=default): SelectSelector(
+            probatio.Required(CONF_LANGUAGES, default=default): SelectSelector(
                 SelectSelectorConfig(
                     options=options,
                     multiple=True,
@@ -461,18 +461,18 @@ class TTSSubentryFlow(_EngineSubentryFlow):
             suggested[CONF_EXTRA_OPTIONS] = {"options": {"retry_badcase": False}}
         return suggested
 
-    async def _settings_schema(self) -> vol.Schema:
+    async def _settings_schema(self) -> probatio.Schema:
         try:
             voices = await self._client.voices(self._data[CONF_MODEL])
         except AudioCppError as err:
             _LOGGER.debug("Could not list voices: %s", err)
             voices = []
         fields: dict[Any, Any] = {
-            vol.Required(
+            probatio.Required(
                 CONF_NAME, default=self._data.get(CONF_NAME, self._data[CONF_MODEL])
             ): TextSelector(),
             **self._language_field(),
-            vol.Optional(CONF_VOICE): SelectSelector(
+            probatio.Optional(CONF_VOICE): SelectSelector(
                 SelectSelectorConfig(
                     options=voices, custom_value=True, mode=SelectSelectorMode.DROPDOWN
                 )
@@ -481,7 +481,7 @@ class TTSSubentryFlow(_EngineSubentryFlow):
         if self._can_stream:
             model = self._model
             fields[
-                vol.Required(
+                probatio.Required(
                     CONF_STREAMING,
                     default=self._data.get(
                         CONF_STREAMING, model is not None and model.streaming
@@ -489,12 +489,12 @@ class TTSSubentryFlow(_EngineSubentryFlow):
                 )
             ] = BooleanSelector()
         fields[
-            vol.Required(
+            probatio.Required(
                 CONF_SPLIT_SENTENCES, default=self._data.get(CONF_SPLIT_SENTENCES, True)
             )
         ] = BooleanSelector()
         if (speed_range := self._speed_range()) is not None:
-            fields[vol.Optional(CONF_SPEED)] = NumberSelector(
+            fields[probatio.Optional(CONF_SPEED)] = NumberSelector(
                 NumberSelectorConfig(
                     min=speed_range[0],
                     max=speed_range[1],
@@ -502,8 +502,8 @@ class TTSSubentryFlow(_EngineSubentryFlow):
                     mode=NumberSelectorMode.BOX,
                 )
             )
-        fields[vol.Optional(CONF_EXTRA_OPTIONS)] = ObjectSelector()
-        return vol.Schema(fields)
+        fields[probatio.Optional(CONF_EXTRA_OPTIONS)] = ObjectSelector()
+        return probatio.Schema(fields)
 
     def _speed_range(self) -> tuple[float, float] | None:
         """Return the speed field's bounds, or None to leave the field out.
@@ -578,14 +578,14 @@ class STTSubentryFlow(_EngineSubentryFlow):
 
         model = self._model
         fields: dict[Any, Any] = {
-            vol.Required(
+            probatio.Required(
                 CONF_NAME, default=self._data.get(CONF_NAME, self._data[CONF_MODEL])
             ): TextSelector(),
             **self._language_field(),
         }
         if self._can_stream:
             fields[
-                vol.Required(
+                probatio.Required(
                     CONF_STREAMING,
                     default=self._data.get(
                         CONF_STREAMING, model is not None and model.streaming
@@ -593,7 +593,7 @@ class STTSubentryFlow(_EngineSubentryFlow):
                 )
             ] = BooleanSelector()
         fields[
-            vol.Required(
+            probatio.Required(
                 CONF_LANGUAGE_HINT,
                 default=self._data.get(CONF_LANGUAGE_HINT, LANGUAGE_HINT_NONE),
             )
@@ -604,13 +604,13 @@ class STTSubentryFlow(_EngineSubentryFlow):
                 mode=SelectSelectorMode.DROPDOWN,
             )
         )
-        fields[vol.Optional(CONF_PROMPT)] = TextSelector(
+        fields[probatio.Optional(CONF_PROMPT)] = TextSelector(
             TextSelectorConfig(multiline=True)
         )
         return self.async_show_form(
             step_id="settings",
             data_schema=self.add_suggested_values_to_schema(
-                vol.Schema(fields), self._data
+                probatio.Schema(fields), self._data
             ),
             errors=errors,
             description_placeholders={"model": self._data[CONF_MODEL]},
