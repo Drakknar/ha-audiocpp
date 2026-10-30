@@ -388,13 +388,14 @@ class _EngineSubentryFlow(ConfigSubentryFlow):
         title = data.pop(CONF_NAME)
         if self.source == "user":
             return self.async_create_entry(title=title, data=data)
-        # What async_update_and_abort does, but with our own wording: since
-        # HA 2026.10 its default reason is translated by the homeassistant
-        # domain, and its ``reason`` argument does not exist before 2026.10.
-        self.hass.config_entries.async_update_subentry(
-            self._get_entry(), self._get_reconfigure_subentry(), title=title, data=data
+        # An explicit reason keeps our own wording (see the server flow).
+        return self.async_update_and_abort(
+            self._get_entry(),
+            self._get_reconfigure_subentry(),
+            title=title,
+            data=data,
+            reason="reconfigure_successful",
         )
-        return self.async_abort(reason="reconfigure_successful")
 
 
 class TTSSubentryFlow(_EngineSubentryFlow):
