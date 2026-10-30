@@ -9,7 +9,7 @@ Use the text-to-speech and speech-recognition models of an [audio.cpp](https://g
 
 ## Requirements
 
-- Home Assistant 2026.9.0 or newer.
+- Home Assistant 2026.10.0 or newer.
 - A running `audiocpp_server` that Home Assistant can reach over the network. If Home Assistant runs on another machine, the server must listen on a reachable address, not `127.0.0.1`.
 
 ## Installation
@@ -84,7 +84,7 @@ With a server older than v0.9.1, the speed field is always shown and only the te
 The tests run against a fake server that implements the audio.cpp wire format:
 
 ```bash
-pip install homeassistant==2026.9.4 pytest-homeassistant-custom-component mutagen ha-ffmpeg
+pip install homeassistant==2026.10.2 pytest-homeassistant-custom-component mutagen ha-ffmpeg
 cd custom_components/audiocpp && pytest
 ```
 

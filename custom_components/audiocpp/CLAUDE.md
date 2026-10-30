@@ -12,7 +12,7 @@ This folder (`custom_components/audiocpp/`) is self-contained: it holds the code
 
 ```
 <repo root>/
-  hacs.json, README.md            HACS metadata (min HA 2026.9.0) and user docs
+  hacs.json, README.md            HACS metadata (min HA 2026.10.0) and user docs
   custom_components/audiocpp/     <- this folder
     __init__.py   Entry setup: builds the client, checks /health (ConfigEntryAuthFailed on 401/403,
                   ConfigEntryNotReady on other failures),
@@ -99,7 +99,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 - **Abort wording (2026.10):** `async_update_and_abort` without `reason` now aborts with `translation_domain="homeassistant"`, so HA's generic "reconfigure successful" text replaces ours ([#180723](https://github.com/home-assistant/core/pull/180723), [#181225](https://github.com/home-assistant/core/pull/181225)).
   - The server flow passes `reason="reconfigure_successful"` (and `"reauth_successful"`) explicitly, which keeps `strings.json`.
   - The subentry `async_update_and_abort` only gained `reason` in 2026.10, so the subentry flows call `async_update_subentry` and `async_abort` themselves to stay compatible with 2026.9.
-- **Voluptuous:** since 2026.9, HA aliases `voluptuous` to probatio (`homeassistant/__init__.py`), and 2026.10 bans it in core. `import voluptuous as vol` still works for custom integrations, with no warning.
+- **Validation:** core moved to probatio in 2026.10 and bans voluptuous; the config flow imports `probatio` directly, as core does (since 2026-10-30; `.ruff.toml` bans voluptuous too). `import voluptuous as vol` would still work, aliased to probatio's shim.
 - **`LanguageSelector`:** single choice only. Languages therefore use `SelectSelector(multiple=True, custom_value=True)`, validated with a BCP-47-like regex.
 - **References:** `homeassistant/components/openai_conversation` (`stt.py`, `tts.py`, `config_flow.py`) is the closest in-tree example of TTS/STT subentries.
 
@@ -117,7 +117,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
   - **Reconfigure:** a blank key field keeps the stored key only while the URL's host and port (scheme default if none) stay the same, so the key is never sent to a different server. For a different host or port no key is stored, and a 401/403 from the new server shows `api_key_for_new_server`, which asks for its key.
   - **Reauth:** a 401/403 from `/health` at setup raises `ConfigEntryAuthFailed`. `reauth_confirm` asks for a new key, checks it against the stored URL, and stores it. A failed entry has no update listener, so the flow uses `async_update_reload_and_abort`; an entry that is still loaded (reauth started by hand) uses `async_update_and_abort` and its update listener reloads it, which avoids the 2026.12 deprecation noted above.
 - **Language hint:** the default `language_hint` is `none`, because some models reject a `language` field. The audio.cpp docs show `en` for multipart and `en-US` for Nemotron live.
-- **Minimum version:** set to 2026.9.0, the oldest version verified (2026.9.4 and 2026.10.1 are tested). Older versions with subentries and TTS streaming may work, but this is untested.
+- **Minimum version:** 2026.10.0 (raised from 2026.9.0 on 2026-10-30, the user's decision, for probatio: core used voluptuous until 2026.10).
 - **SSE parsing:** done by hand rather than with `readline`, because a base64 audio line can exceed aiohttp's line-length limit.
 
 ## Verification status
