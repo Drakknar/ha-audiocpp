@@ -13,12 +13,10 @@ Endpoints used, as documented in the server README:
   a model in streaming mode, so recognition runs while the user speaks.
 """
 
-from __future__ import annotations
-
 import base64
 import binascii
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Mapping
-from contextlib import aclosing, asynccontextmanager
+from contextlib import aclosing, asynccontextmanager, suppress
 from dataclasses import dataclass
 import io
 import json
@@ -136,8 +134,7 @@ def normalize_url(url: str) -> str:
         # logged errors. A proxy token belongs in the API key field.
         raise ValueError("URL must not contain a username or password")
     path = parts.path.rstrip("/")
-    if path.endswith("/v1"):
-        path = path[: -len("/v1")]
+    path = path.removesuffix("/v1")
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 
@@ -201,7 +198,9 @@ def _parse_params(rows: Any) -> tuple[ModelParam, ...] | None:
                 name=row["name"],
                 min=_number(row.get("min")),
                 max=_number(row.get("max")),
-                values=tuple(str(v) for v in values) if isinstance(values, list) else (),
+                values=tuple(str(v) for v in values)
+                if isinstance(values, list)
+                else (),
             )
         )
     return tuple(params)
@@ -211,10 +210,8 @@ async def _error_from_response(response: aiohttp.ClientResponse) -> AudioCppErro
     """Build an exception from an HTTP error response."""
     text = (await response.text(errors="replace"))[:MAX_ERROR_TEXT]
     message = text
-    try:
+    with suppress(ValueError, KeyError, TypeError):
         message = json.loads(text)["error"]["message"]
-    except (ValueError, KeyError, TypeError):
-        pass
     message = f"HTTP {response.status}: {message}".strip()
     if response.status in (401, 403):
         return AudioCppAuthError(message)
@@ -249,7 +246,9 @@ async def iter_sse(response: aiohttp.ClientResponse) -> AsyncGenerator[dict[str,
             try:
                 event = json.loads(payload)
             except ValueError as err:
-                raise AudioCppRequestError("Server sent a malformed stream event") from err
+                raise AudioCppRequestError(
+                    "Server sent a malformed stream event"
+                ) from err
             if not isinstance(event, dict):
                 continue
             if event.get("type") == "error":
@@ -420,12 +419,15 @@ class AudioCppClient:
         body = self._speech_body(model, text, voice, speed, extra)
         body["response_format"] = "pcm"
         body["stream_format"] = "sse"
-        async with self._request(
-            "POST",
-            "/v1/audio/speech",
-            json=body,
-            headers={"Accept": "text/event-stream"},
-        ) as response, aclosing(iter_sse(response)) as events:
+        async with (
+            self._request(
+                "POST",
+                "/v1/audio/speech",
+                json=body,
+                headers={"Accept": "text/event-stream"},
+            ) as response,
+            aclosing(iter_sse(response)) as events,
+        ):
             async for event in events:
                 if event.get("type") != "speech.audio.delta":
                     continue
@@ -461,7 +463,9 @@ class AudioCppClient:
             try:
                 data = await response.json(content_type=None)
             except ValueError as err:
-                raise AudioCppRequestError("Transcription response was not JSON") from err
+                raise AudioCppRequestError(
+                    "Transcription response was not JSON"
+                ) from err
         if not isinstance(data, dict):
             raise AudioCppRequestError("Transcription response had an unexpected shape")
         return str(data.get("text") or "")
@@ -500,16 +504,19 @@ class AudioCppClient:
                     yield chunk
 
         deltas: list[str] = []
-        async with self._request(
-            "POST",
-            "/v1/audio/transcriptions/live",
-            params=params,
-            data=body(),
-            headers={
-                "Content-Type": "application/octet-stream",
-                "Accept": "text/event-stream",
-            },
-        ) as response, aclosing(iter_sse(response)) as events:
+        async with (
+            self._request(
+                "POST",
+                "/v1/audio/transcriptions/live",
+                params=params,
+                data=body(),
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "Accept": "text/event-stream",
+                },
+            ) as response,
+            aclosing(iter_sse(response)) as events,
+        ):
             async for event in events:
                 event_type = event.get("type")
                 if event_type == "transcript.text.delta":

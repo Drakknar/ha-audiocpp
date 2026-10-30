@@ -1,7 +1,5 @@
 """Text-to-speech engines backed by audio.cpp."""
 
-from __future__ import annotations
-
 from collections.abc import AsyncGenerator, AsyncIterable
 from contextlib import aclosing
 import logging
@@ -11,9 +9,9 @@ from typing import TYPE_CHECKING, Any, override
 from homeassistant.components.tts import (
     ATTR_VOICE,
     TextToSpeechEntity,
-    TtsAudioType,
     TTSAudioRequest,
     TTSAudioResponse,
+    TtsAudioType,
     Voice,
 )
 from homeassistant.config_entries import ConfigSubentry
@@ -122,9 +120,7 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
         languages: list[str] = data[CONF_LANGUAGES]
         self._attr_supported_languages = languages
         self._attr_default_language = languages[0]
-        self._attr_default_options = (
-            {ATTR_VOICE: self._voice} if self._voice else None
-        )
+        self._attr_default_options = {ATTR_VOICE: self._voice} if self._voice else None
         self._voices: list[Voice] = []
 
     @override

@@ -1,7 +1,5 @@
 """A stand-in audio.cpp server speaking the documented wire format."""
 
-from __future__ import annotations
-
 import asyncio
 import base64
 import copy
@@ -15,8 +13,18 @@ SAMPLE_RATE = 24000
 MODELS = [
     {"id": "kitt-en", "family": "pocket_tts", "task": "tts", "mode": "streaming"},
     {"id": "kokoro", "family": "kokoro_tts", "task": "tts", "mode": "offline"},
-    {"id": "chatterbox-italian", "family": "chatterbox", "task": "clon", "mode": "offline"},
-    {"id": "nemotron-stream", "family": "nemotron_asr", "task": "asr", "mode": "streaming"},
+    {
+        "id": "chatterbox-italian",
+        "family": "chatterbox",
+        "task": "clon",
+        "mode": "offline",
+    },
+    {
+        "id": "nemotron-stream",
+        "family": "nemotron_asr",
+        "task": "asr",
+        "mode": "streaming",
+    },
     {"id": "parakeet", "family": "parakeet_tdt", "task": "asr", "mode": "offline"},
 ]
 # Request options each model declares (``include_params``, audio.cpp v0.9.1+).
@@ -25,8 +33,12 @@ PARAMS = {
         {"name": "seed", "type": "int", "min": 0},
         {"name": "temperature", "type": "float", "default": 0.7, "min": 0},
         {"name": "text_chunk_tokens", "type": "int", "min": 1},
-        {"name": "text_chunk_mode", "type": "enum", "preset": "text_chunk_mode_full",
-         "values": ["word_budget", "tag_aware"]},
+        {
+            "name": "text_chunk_mode",
+            "type": "enum",
+            "preset": "text_chunk_mode_full",
+            "values": ["word_budget", "tag_aware"],
+        },
         {"name": "instruct", "type": "string"},
     ],
     "kokoro": [
@@ -46,7 +58,9 @@ PARAMS = {
 def _pcm(text: str) -> bytes:
     # One 16-bit sample per character, value = character code, so a test can
     # read back which text produced which audio.
-    return b"".join(min(ord(ch), 32767).to_bytes(2, "little", signed=True) for ch in text)
+    return b"".join(
+        min(ord(ch), 32767).to_bytes(2, "little", signed=True) for ch in text
+    )
 
 
 def _wav(pcm: bytes) -> bytes:
@@ -69,6 +83,7 @@ class FakeAudioCpp:
     """Records what it was sent so tests can assert on it."""
 
     def __init__(self) -> None:
+        """Start with no requests recorded and the current server's params."""
         self.speech_requests: list[dict] = []
         self.transcriptions: list[dict] = []
         self.live: list[dict] = []
@@ -100,9 +115,13 @@ class FakeAudioCpp:
         return await handler(request)
 
     async def health(self, request: web.Request) -> web.Response:
-        return web.json_response({"status": "ok", "backend": "cpu", "models": len(MODELS)})
+        """Answer /health."""
+        return web.json_response(
+            {"status": "ok", "backend": "cpu", "models": len(MODELS)}
+        )
 
     async def models(self, request: web.Request) -> web.Response:
+        """Answer /v1/models."""
         data = [{**m, "object": "model", "loaded": False} for m in MODELS]
         if self.instruct_field:
             for entry in data:
@@ -113,6 +132,7 @@ class FakeAudioCpp:
         return web.json_response({"object": "list", "data": data})
 
     async def voices(self, request: web.Request) -> web.Response:
+        """Answer /v1/audio/voices, after the gate if set, or fail if told to."""
         if self.voices_gate is not None:
             await self.voices_gate.wait()
         if self.voices_fail:
@@ -120,6 +140,7 @@ class FakeAudioCpp:
         return web.json_response({"voices": ["kitt_eng", "alba"]})
 
     async def speech(self, request: web.Request) -> web.StreamResponse:
+        """Record a speech request and return audio."""
         body = await request.json()
         self.speech_requests.append(body)
         model = next((m for m in MODELS if m["id"] == body["model"]), None)
@@ -133,24 +154,34 @@ class FakeAudioCpp:
         if "stream_format" not in body:
             return web.Response(body=_wav(_pcm(text)), content_type="audio/wav")
         if model["mode"] != "streaming":
-            return _error(500, "speech streaming requires a model configured with mode=streaming")
+            return _error(
+                500, "speech streaming requires a model configured with mode=streaming"
+            )
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
         await response.prepare(request)
         if "FAIL" in text:
-            await response.write(b'data: {"type":"error","error":{"message":"boom"}}\n\n')
+            await response.write(
+                b'data: {"type":"error","error":{"message":"boom"}}\n\n'
+            )
             await response.write_eof()
             return response
         pcm = _pcm(text)
         half = len(pcm) // 2 // 2 * 2
         for part in (pcm[:half], pcm[half:]):
-            event = {"type": "speech.audio.delta", "audio": base64.b64encode(part).decode()}
+            event = {
+                "type": "speech.audio.delta",
+                "audio": base64.b64encode(part).decode(),
+            }
             await response.write(f"data: {json.dumps(event)}\n\n".encode())
-        await response.write(b'data: {"type":"speech.audio.done","timing":{"ttft_ms":1}}\n\n')
+        await response.write(
+            b'data: {"type":"speech.audio.done","timing":{"ttft_ms":1}}\n\n'
+        )
         await response.write(b"data: [DONE]\n\n")
         await response.write_eof()
         return response
 
     async def transcribe(self, request: web.Request) -> web.Response:
+        """Record a transcription request and return its text."""
         form = await request.post()
         upload = form["file"]
         audio = upload.file.read()
@@ -170,6 +201,7 @@ class FakeAudioCpp:
         return web.json_response({"text": f" heard {frames} frames ", "timing": {}})
 
     async def transcribe_live(self, request: web.Request) -> web.StreamResponse:
+        """Record a live transcription and stream its text."""
         # Headers go out before the body is read, as the real server does, so
         # this only works if the client reads and writes at the same time.
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
@@ -181,7 +213,13 @@ class FakeAudioCpp:
             chunks += 1
             delta = {"type": "transcript.text.delta", "delta": f"[{len(chunk)}]"}
             await response.write(f"data: {json.dumps(delta)}\n\n".encode())
-        self.live.append({**request.query, "bytes": received, "chunked": request.headers.get("Transfer-Encoding")})
+        self.live.append(
+            {
+                **request.query,
+                "bytes": received,
+                "chunked": request.headers.get("Transfer-Encoding"),
+            }
+        )
         done = {"type": "transcript.text.done", "text": f"live {received} bytes"}
         await response.write(f"data: {json.dumps(done)}\n\n".encode())
         await response.write(b"data: [DONE]\n\n")

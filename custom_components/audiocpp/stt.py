@@ -1,7 +1,5 @@
 """Speech-to-text engines backed by audio.cpp."""
 
-from __future__ import annotations
-
 from collections.abc import AsyncIterable
 import logging
 from typing import TYPE_CHECKING, override
@@ -101,7 +99,7 @@ class AudioCppSTTEntity(stt.SpeechToTextEntity, AudioCppEntity):
         if self._language_hint == LANGUAGE_HINT_FULL:
             return language
         if self._language_hint == LANGUAGE_HINT_CODE:
-            return language.split("-")[0]
+            return language.split("-", maxsplit=1)[0]
         return None
 
     @override
