@@ -4,8 +4,9 @@ name: Checks
 # the pytest suite in custom_components/audiocpp/tests (against its fake
 # audio.cpp server) on Home Assistant's test harness, and actionlint on the
 # workflows themselves.
-# Not a required check yet: pull requests opened by the Compatibility review
-# use GITHUB_TOKEN, which doesn't trigger this workflow.
+# Its jobs are required on main. Pull requests opened by the Compatibility review
+# use GITHUB_TOKEN, which doesn't trigger this workflow: close and reopen one by
+# hand to run them. Release waits for this workflow on main.
 on:
   pull_request:
   push:
