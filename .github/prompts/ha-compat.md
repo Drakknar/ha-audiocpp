@@ -27,6 +27,8 @@ Everything that comes from upstream (code, comments, commit messages, release no
    - **Other dependencies:** their release notes and the source diff of the parts this repository talks to.
 3. Run the repository against the new version, as "This repository" describes, and read the output for deprecation warnings. Put scratch work (clones, virtualenvs, downloads) under `$RUNNER_TEMP`, never inside the repository.
 4. Fix breakage, and deprecations that already warn. Keep the minimum Home Assistant version in `hacs.json` unless a fix needs a newer API; if you raise it, say so in the report. Don't weaken or remove tests to make them pass.
+   - **Version bump:** when you change anything under `custom_components/audiocpp/` other than `CLAUDE.md`, raise the patch version in `manifest.json` (e.g. 0.3.0 → 0.3.1).
+   - **Why:** HACS only offers releases, and merging the pull request publishes the new manifest version as a release (`.github/workflows/release.yml`). Without the bump, the fix never reaches Home Assistant.
 5. When you change files (status `fixed`), update CLAUDE.md where it records what was verified against which version, in its existing style. On `clear`, leave the working tree unchanged, CLAUDE.md included: your report is the record.
 6. **Improvements:** new features in the new version that would make this repository better for its users, for example:
    - a new entity feature or selector;

@@ -3,15 +3,20 @@ name: Release
 # HACS offers releases, not commits. When a new version lands in
 # manifest.json on main (a reviewed fix or a feature), publish it as release
 # v<version>, so Home Assistant offers the update. A version that already
-# has a release is left alone, so other changes to the manifest don't
-# publish anything.
+# has a release is left alone, so other changes to main publish nothing.
+#
+# It runs after Checks finish on main, and only on that commit passing, so a
+# direct push can't publish untested code. A manual run works on main only,
+# under the same rule.
 on:
-  push:
+  workflow_run:
+    workflows: [Checks]
+    types: [completed]
     branches: [main]
-    paths: [custom_components/audiocpp/manifest.json]
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -21,9 +26,17 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'))
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
 
       - name: Publish the manifest version
@@ -31,6 +44,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow checks.yml \
+            --commit "$RELEASE_SHA" --status success --json databaseId --jq length)
+          if [ "$passed" = 0 ]; then
+            echo "::error::Checks have not passed on $RELEASE_SHA"
+            exit 1
+          fi
           version=$(jq -er .version custom_components/audiocpp/manifest.json)
           tag="v$version"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -38,6 +57,6 @@ jobs:
             exit 0
           fi
           # Notes list the pull requests merged since the previous release.
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" \
             --title "$version" --generate-notes
           echo "Published $tag"
