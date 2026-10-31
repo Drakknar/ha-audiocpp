@@ -1,0 +1,43 @@
+name: Release
+
+# HACS offers releases, not commits. When a new version lands in
+# manifest.json on main (a reviewed fix or a feature), publish it as release
+# v<version>, so Home Assistant offers the update. A version that already
+# has a release is left alone, so other changes to the manifest don't
+# publish anything.
+on:
+  push:
+    branches: [main]
+    paths: [custom_components/audiocpp/manifest.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Publish the manifest version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(jq -er .version custom_components/audiocpp/manifest.json)
+          tag="v$version"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$tag is already released"
+            exit 0
+          fi
+          # Notes list the pull requests merged since the previous release.
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$version" --generate-notes
+          echo "Published $tag"
