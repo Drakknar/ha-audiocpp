@@ -140,7 +140,7 @@ jobs:
 
       # No cache: a cache saved after Claude's run could carry planted files
       # into later runs.
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -177,7 +177,7 @@ jobs:
 
       - name: Claude
         id: claude
-        uses: anthropics/claude-code-action@8041f1d17e0e7d2f2cfe35002962e9f26237c0bb # v1.0.263
+        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
         env:
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
         with:
