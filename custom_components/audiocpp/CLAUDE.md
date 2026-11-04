@@ -86,7 +86,7 @@ These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `ap
 
 ## Findings: Home Assistant APIs
 
-Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running the tests on both.
+Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running the tests on both. Rechecked against 2026.11.0 (2026-11-04): none of the modules used here changed between 2026.11.0b0 and 2026.11.0, and the tests pass on it.
 
 - **TTS streaming input:** `TextToSpeechEntity.async_supports_streaming_input()` is true when `async_stream_tts_audio` is overridden. Assist then streams LLM text through `TTSAudioRequest.message_gen`.
   - The entity returns `TTSAudioResponse("wav", data_gen)`.
@@ -125,6 +125,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 - **Automated tests:** `pytest` gives 7 passed against HA 2026.9.4 and 2026.10.1 on Python 3.14 (2026-10-12; `test_tts_through_home_assistant` needs an `ffmpeg` binary on PATH and is skipped without one). The tests use a fake server that follows the documented wire format, including full-duplex live STT.
   - **Declared options (2026-10-17):** 3 new tests (speed field, save check, repair issue). The fake server reports `PARAMS` per model, and `FakeAudioCpp.params = None` acts as a pre-v0.9.1 server. 9 passed, ffmpeg test skipped, on HA 2026.10.1 on the Windows PC.
   - **audio.cpp `v0.9.2-drama3-base-small` (2026-10-19):** the fake server lists `device`/`configured`, and rejects a top-level `instruct` sent together with `instructions` (`FakeAudioCpp.instruct_field = False` acts as an older server). 1 new test. 10 passed, ffmpeg test skipped, on HA 2026.10.1 on Python 3.14. Rebased onto 0.3.0 (2026-10-27): 15 passed, ffmpeg test skipped.
+  - **HA 2026.11.0 (2026-11-04):** `pytest-homeassistant-custom-component` stops at 0.13.375 (HA 2026.10.4) and fails to import on 2026.11, because core removed a private logger helper it imports. Its README now calls it broken and points to core's own `pytest-homeassistant` ([#190049](https://github.com/home-assistant/core/pull/190049)). `tests/conftest.py` loads the old harness by name only when `pytest_homeassistant` isn't installed (the new one registers itself). It also points `hass_config_dir` at `hass_tmp_config_dir`, because the new `hass` fixture uses `tests/testing_config` without creating it, and the TTS cache then fails to initialise. `pytest.ini` adds `-p no:respx` so HA can alias `httpx` to `httpx2` before respx imports it. 16 passed (ffmpeg test included) on HA 2026.11.0 with `pytest-homeassistant` installed from the core tag, and on HA 2026.10.4 with 0.13.375.
   - **Windows runs:** use stub `fcntl.py`/`resource.py` in site-packages and a `-p` plugin that turns `pytest_socket.disable_socket` into a no-op. The hass fixture's teardown then raises `WinError 10022` on some tests, which is an environment issue.
 - **Code review (2026-10-05):** found 2 issues, both fixed and covered by tests. (1) Reconfiguring the server with a blank API key dropped the stored key; a blank key now keeps it (since 2026-10-24 only for the same host and port). (2) Credentials in the URL leaked into the entry title and logs; `normalize_url` now rejects them.
 - **Bug found in real use (2026-10-05): "TTS engine name is not set".**
@@ -132,7 +133,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
   - **Fix:** `has_entity_name=False` with `_attr_name = subentry.title`, as HA core's OpenAI TTS does. Entity ids are unchanged, since they live in the entity registry.
   - **Why the tests missed it:** they called the entity directly. `test_tts_through_home_assistant` now goes through `tts.async_create_stream`, the manager path.
   - **Real-server check:** passed through HA's TTS manager against the real OmniVoice server, for en and it, in default mp3, mp3, flac, and streamed-message modes.
-  - **Test gotcha:** the harness's `testing_config/tts` file cache is shared across tests and runs. Turn it off with `hass.data[DATA_TTS_MANAGER].use_file_cache = False`, or stale clips get served.
+  - **Test gotcha:** the harness's `testing_config/tts` file cache is shared across tests and runs. Turn it off with `hass.data[DATA_TTS_MANAGER].use_file_cache = False`, or stale clips get served. (Since 2026-11-04 each test gets its own config dir, see the HA 2026.11.0 note above, but the tests still turn the cache off.)
 - **Lint:** ruff (E,F,W,B,UP,SIM,ASYNC) is clean apart from one stylistic SIM105 note in `api.py`.
 - **Real use (2026-10-10):** installed in the author's Home Assistant (2026.10.0) and tested by the author against their real `audiocpp_server`.
 
@@ -168,10 +169,15 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 ## Running the tests
 
 ```bash
-# Python 3.14 is needed for HA 2026.9.x and 2026.10.x
+# Python 3.14 is needed for HA 2026.9.x to 2026.11.x
+# HA 2026.11 and later: core's harness, same version as homeassistant
+pip install homeassistant==2026.11.0 pytest-homeassistant==2026.11.0 mutagen ha-ffmpeg
+# HA 2026.10.x: the old harness (don't install both)
 pip install homeassistant==2026.10.1 pytest-homeassistant-custom-component==0.13.372 mutagen ha-ffmpeg
 cd custom_components/audiocpp && pytest
 ```
+
+On 2026-11-04 PyPI had only `pytest-homeassistant` 2026.11.0b4–b6. Until 2026.11.0 is published, install it from the core tag: `pip install "git+https://github.com/home-assistant/core@2026.11.0#subdirectory=packages/pytest-homeassistant"`. The PyPI `pytest-homeassistant` 0.1.x is an unrelated older project.
 
 `pytest.ini` puts the repository root on the path, so the folder must sit inside a `custom_components/` directory (the repository layout, or a Home Assistant config) for the imports to resolve. The tests use the harness's `socket_enabled` fixture because the fake server is real loopback HTTP.
 

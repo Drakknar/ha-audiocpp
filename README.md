@@ -88,6 +88,8 @@ pip install homeassistant==2026.10.2 pytest-homeassistant-custom-component mutag
 cd custom_components/audiocpp && pytest
 ```
 
+From Home Assistant 2026.11, install core's `pytest-homeassistant` (same version as `homeassistant`) instead of `pytest-homeassistant-custom-component`; don't install both.
+
 Implementation notes and the audio.cpp API findings are in [`custom_components/audiocpp/CLAUDE.md`](custom_components/audiocpp/CLAUDE.md).
 
 ## License
