@@ -52,7 +52,7 @@ Status:
   - Install `homeassistant==<new>`, core's test harness `pytest-homeassistant==<new>` (the same version), `mutagen` and `ha-ffmpeg`. Never install `pytest-homeassistant-custom-component` alongside it: that harness stopped at Home Assistant 2026.10.4.
   - If PyPI doesn't have `pytest-homeassistant==<new>` yet, install it from the core tag: `uv pip install "pytest-homeassistant@git+https://github.com/home-assistant/core@<new>#subdirectory=packages/pytest-homeassistant"`, and say so in the report. The PyPI `pytest-homeassistant` 0.1.x is an unrelated project.
   - Run `pytest` in `custom_components/audiocpp`.
-  - If `.github/workflows/checks.yml` pins an older `HA_CURRENT`/`HARNESS_CURRENT`, say in the report that it needs bumping (edits under `.github/` are dropped from your run).
+  - CI (`.github/workflows/checks.yml`) tests only the minimum Home Assistant in `hacs.json`. If the new release is newer than that minimum, say in the report that CI only tests the minimum, not this release.
 - **Home Assistant areas to check:**
   - the `tts` and `stt` entity APIs (streaming input via `TTSAudioRequest`/`TTSAudioResponse`, `async_process_audio_stream`);
   - config entry subentries and their flows (`async_update_and_abort`, update listeners);
