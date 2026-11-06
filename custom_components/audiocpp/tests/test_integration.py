@@ -723,6 +723,37 @@ async def test_instruction_field(hass: HomeAssistant, fake) -> None:
     await entity.async_get_tts_audio("Hi there.", "en", {})
     assert server.speech_requests[-1]["options"] == expected
 
+    # A server that no longer describes options (before v0.9.1): the stored
+    # option name keeps the field, also when the form comes back with an error.
+    server.params = None
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "tts"),
+        context={"source": "reconfigure", "subentry_id": sub.subentry_id},
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"model": "kitt-en"}
+    )
+    settings = {
+        "name": "KITT",
+        "languages": ["en"],
+        "split_sentences": True,
+        "instruction": "a calm, low voice",
+    }
+    # kitt-en rejects speed, so the test synthesis fails.
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**settings, "speed": 1.5}
+    )
+    assert result["errors"] == {"base": "probe_failed"}
+    assert "instruction" in {str(key) for key in result["data_schema"].schema}
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], settings
+    )
+    assert result["type"] is FlowResultType.ABORT, result
+    await hass.async_block_till_done()
+    sub = _subentry(entry, "tts")
+    assert sub.data["instruction"] == "a calm, low voice"
+    assert sub.data["instruction_option"] == "instruct"
+
 
 async def test_repair_issue_for_stale_options(hass: HomeAssistant, fake) -> None:
     """Test the repair issue for options the server no longer accepts."""

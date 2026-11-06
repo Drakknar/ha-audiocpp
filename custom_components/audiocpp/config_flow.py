@@ -537,6 +537,15 @@ class TTSSubentryFlow(_EngineSubentryFlow):
             return param.name if param is not None else None
         return self._data.get(CONF_INSTRUCTION_OPTION)
 
+    @override
+    def _keep_input(self, user_input: dict[str, Any]) -> None:
+        # The stored option name is not a form field, and for a model the
+        # server does not describe it is all that keeps the instruction field.
+        option = self._instruction_option
+        super()._keep_input(user_input)
+        if option is not None:
+            self._data[CONF_INSTRUCTION_OPTION] = option
+
     def _speed_range(self) -> tuple[float, float] | None:
         """Return the speed field's bounds, or None to leave the field out.
 
