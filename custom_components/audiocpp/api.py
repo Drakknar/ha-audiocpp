@@ -386,9 +386,9 @@ class AudioCppClient:
                 mode=str(entry.get("mode", "")),
                 params=_parse_params(entry.get("params")),
                 instruct_field="configured" in entry,
-                device=entry["device"]
-                if isinstance(entry.get("device"), int)
-                else None,
+                device=(
+                    entry["device"] if isinstance(entry.get("device"), int) else None
+                ),
                 configured=(
                     entry["configured"]
                     if isinstance(entry.get("configured"), bool)

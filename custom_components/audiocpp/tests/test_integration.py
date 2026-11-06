@@ -90,6 +90,17 @@ async def _add_engine(hass, entry, kind: str, model: str, settings: dict):
     return result
 
 
+async def _settings_schema(hass, entry, kind: str, model: str) -> dict:
+    """Open a new engine's settings step for ``model``; return its schema."""
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, kind), context={"source": "user"}
+    )
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {"model": model}
+    )
+    return result["data_schema"].schema
+
+
 def _entity(hass, domain_component, platform: str, subentry_id: str):
     entity_id = er.async_get(hass).async_get_entity_id(platform, DOMAIN, subentry_id)
     assert entity_id, f"no {platform} entity for {subentry_id}"
@@ -515,13 +526,8 @@ async def test_speed_field_follows_model(hass: HomeAssistant, fake) -> None:
     entry = await _add_server(hass, url)
 
     async def settings_fields(model: str) -> dict:
-        result = await hass.config_entries.subentries.async_init(
-            (entry.entry_id, "tts"), context={"source": "user"}
-        )
-        result = await hass.config_entries.subentries.async_configure(
-            result["flow_id"], {"model": model}
-        )
-        return {str(key): value for key, value in result["data_schema"].schema.items()}
+        schema = await _settings_schema(hass, entry, "tts", model)
+        return {str(key): value for key, value in schema.items()}
 
     def bounds(selector) -> tuple:
         return selector.config["min"], selector.config["max"]
@@ -687,13 +693,7 @@ async def test_instruction_field(hass: HomeAssistant, fake) -> None:
     entry = await _add_server(hass, url)
 
     async def settings_fields(model: str) -> set[str]:
-        result = await hass.config_entries.subentries.async_init(
-            (entry.entry_id, "tts"), context={"source": "user"}
-        )
-        result = await hass.config_entries.subentries.async_configure(
-            result["flow_id"], {"model": model}
-        )
-        return {str(key) for key in result["data_schema"].schema}
+        return {str(key) for key in await _settings_schema(hass, entry, "tts", model)}
 
     # Pocket TTS declares `instruct` here; Kokoro declares nothing like it.
     assert "instruction" in await settings_fields("kitt-en")
@@ -943,14 +943,8 @@ async def test_language_hint_suggested_for_nemotron_transcribe(
     entry = await _add_server(hass, url)
 
     async def hint_default(model: str) -> str:
-        result = await hass.config_entries.subentries.async_init(
-            (entry.entry_id, "stt"), context={"source": "user"}
-        )
-        result = await hass.config_entries.subentries.async_configure(
-            result["flow_id"], {"model": model}
-        )
-        key = next(k for k in result["data_schema"].schema if k == "language_hint")
-        return key.default()
+        schema = await _settings_schema(hass, entry, "stt", model)
+        return next(k for k in schema if k == "language_hint").default()
 
     assert await hint_default("nemotron-transcribe") == "full"
     assert await hint_default("parakeet") == "none"

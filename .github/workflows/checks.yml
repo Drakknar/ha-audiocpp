@@ -20,13 +20,6 @@ concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # The minimum (hacs.json) is also the current release, so one run covers both. Core's
-  # harness has the same version as homeassistant (the PyPI 0.1.x is an unrelated project).
-  # Add a second venv here again once the minimum falls behind the current release.
-  HA_CURRENT: homeassistant==2026.11.0
-  HARNESS_CURRENT: pytest-homeassistant==2026.11.0
-
 jobs:
   pytest:
     runs-on: ubuntu-latest
@@ -34,15 +27,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
-      # mutagen and ha-ffmpeg: needed by the tts and stt platforms.
+      # The minimum Home Assistant comes from hacs.json; it is also the current release,
+      # so one run covers both (add a second venv once the minimum falls behind).
+      # Core's harness has the same version as homeassistant (the PyPI 0.1.x is an
+      # unrelated project). mutagen and ha-ffmpeg: needed by the tts and stt platforms.
       - name: Install the test harness
         run: |
-          uv venv -p 3.14 "$RUNNER_TEMP/current"
-          VIRTUAL_ENV=$RUNNER_TEMP/current uv pip install "$HA_CURRENT" "$HARNESS_CURRENT" mutagen ha-ffmpeg
+          ha=$(jq -r .homeassistant hacs.json)
+          uv venv -p 3.14 "$RUNNER_TEMP/venv"
+          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "homeassistant==$ha" "pytest-homeassistant==$ha" mutagen ha-ffmpeg
 
-      - name: pytest (Home Assistant 2026.11, the minimum)
+      - name: pytest (minimum Home Assistant)
         working-directory: custom_components/audiocpp
-        run: '"$RUNNER_TEMP/current/bin/python" -m pytest'
+        run: '"$RUNNER_TEMP/venv/bin/python" -m pytest'
 
   ruff:
     runs-on: ubuntu-latest
