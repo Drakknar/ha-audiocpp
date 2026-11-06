@@ -123,9 +123,13 @@ class AudioCppSTTEntity(stt.SpeechToTextEntity, AudioCppEntity):
                         self.model, stream, fmt, language=language, prompt=self._prompt
                     )
                 ) as results:
+                    sent = ""
                     async for text, final in results:
-                        if not final and text.strip():
-                            yield stt.PartialSpeechResult(text.strip())
+                        partial = text.strip()
+                        # A whitespace-only delta leaves the text unchanged.
+                        if not final and partial and partial != sent:
+                            sent = partial
+                            yield stt.PartialSpeechResult(partial)
             else:
                 pcm = bytearray()
                 async for chunk in stream:

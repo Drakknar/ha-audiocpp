@@ -989,6 +989,8 @@ async def test_stt_live_and_file(hass: HomeAssistant, fake) -> None:
     assert partials and all(isinstance(p, stt.PartialSpeechResult) for p in partials)
     texts = [p.text for p in partials]
     assert all(b.startswith(a) for a, b in itertools.pairwise(texts))
+    # The fake's whitespace-only deltas repeat no partial.
+    assert all(a != b for a, b in itertools.pairwise(texts))
     assert texts[-1].count("[") == len(texts)
     (live,) = server.live
     assert live["model"] == "nemotron-stream" and live["sample_rate"] == "16000"

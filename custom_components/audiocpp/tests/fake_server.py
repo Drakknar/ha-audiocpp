@@ -231,6 +231,9 @@ class FakeAudioCpp:
             chunks += 1
             delta = {"type": "transcript.text.delta", "delta": f"[{len(chunk)}]"}
             await response.write(f"data: {json.dumps(delta)}\n\n".encode())
+            # A whitespace-only delta, which leaves the transcript unchanged.
+            blank = {"type": "transcript.text.delta", "delta": " "}
+            await response.write(f"data: {json.dumps(blank)}\n\n".encode())
         self.live.append(
             {
                 **request.query,
