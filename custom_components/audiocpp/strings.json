@@ -136,7 +136,7 @@
           "data_description": {
             "languages": "Languages this engine offers to Home Assistant.",
             "streaming": "Send audio while it is captured (/v1/audio/transcriptions/live), so the model decodes as you speak. Off uploads the whole recording when you stop. Only offered for models the server runs with mode streaming.",
-            "language_hint": "Whether to pass the conversation language to the model. Some models take none and reject the field. Nemotron Transcribe takes a full tag such as en-US, so it is suggested for it.",
+            "language_hint": "Whether to pass the conversation language to the model. Some models take none and reject the field. Nemotron Transcribe takes a language code such as en, so it is suggested for it.",
             "prompt": "Optional context such as names or hotwords, for models that support it."
           }
         }

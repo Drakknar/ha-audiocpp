@@ -57,7 +57,7 @@ With a server older than v0.9.1, the speed field is always shown and only the te
 |---|---|
 | Languages | The languages this engine offers to Home Assistant. |
 | Use the live streaming endpoint | Send audio while it is captured, so the model decodes as you speak. Only offered for models the server runs with `mode: streaming`. |
-| Language sent to the model | Nothing (default), a language code (`en`), or a full tag (`en-US`). Some models reject a language field. For Nemotron Transcribe the form suggests the full tag, which the server turns into a language hint for the model (audio.cpp v0.9.4). |
+| Language sent to the model | Nothing (default), a language code (`en`), or a full tag (`en-US`). Some models reject a language field. For Nemotron Transcribe the form suggests the language code, which the server turns into a language hint for the model (audio.cpp builds before v0.9.4 pass a full tag through unmapped). |
 | Recognition prompt | Optional context such as names or hotwords, for models that support it. |
 
 ## Model notes

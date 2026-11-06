@@ -1032,7 +1032,7 @@ async def test_stt_live_and_file(hass: HomeAssistant, fake) -> None:
 async def test_language_hint_suggested_for_nemotron_transcribe(
     hass: HomeAssistant, fake
 ) -> None:
-    """Test that Nemotron Transcribe gets the full language tag by default."""
+    """Test that Nemotron Transcribe gets the language code by default."""
     _, url = fake
     entry = await _add_server(hass, url)
 
@@ -1040,7 +1040,7 @@ async def test_language_hint_suggested_for_nemotron_transcribe(
         schema = await _settings_schema(hass, entry, "stt", model)
         return next(k for k in schema if k == "language_hint").default()
 
-    assert await hint_default("nemotron-transcribe") == "full"
+    assert await hint_default("nemotron-transcribe") == "code"
     assert await hint_default("parakeet") == "none"
 
 

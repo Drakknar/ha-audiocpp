@@ -67,7 +67,7 @@ from .const import (
     CONF_STREAMING,
     CONF_VOICE,
     DOMAIN,
-    LANGUAGE_HINT_FULL,
+    LANGUAGE_HINT_CODE,
     LANGUAGE_HINT_NONE,
     LANGUAGE_HINTS,
     PROBE_TEXT,
@@ -81,8 +81,9 @@ from .options import check_speech_options, speech_extra
 
 _LOGGER = logging.getLogger(__name__)
 
-# ASR families that take a language hint. Nemotron Transcribe maps a tag such
-# as en-US or pt_BR to the language name itself (audio.cpp v0.9.4).
+# ASR families that take a language hint. Nemotron Transcribe maps a code such
+# as en to the language name; builds before v0.9.4 pass a regional tag (en-US)
+# through unmapped, so the code works on every build.
 _LANGUAGE_HINT_FAMILIES = frozenset({"nemotron_transcribe"})
 
 # Speed range offered when the model does not declare its own bounds.
@@ -632,9 +633,9 @@ class STTSubentryFlow(_EngineSubentryFlow):
                 )
             ] = BooleanSelector()
         # The default sends no language, which some models reject; a family
-        # known to take one gets the full tag.
+        # known to take one gets the language code.
         hint = (
-            LANGUAGE_HINT_FULL
+            LANGUAGE_HINT_CODE
             if model is not None and model.family in _LANGUAGE_HINT_FAMILIES
             else LANGUAGE_HINT_NONE
         )
