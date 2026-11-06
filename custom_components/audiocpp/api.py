@@ -62,6 +62,14 @@ class AudioCppRequestError(AudioCppError):
     """The server rejected or failed a request."""
 
 
+class AudioCppBusyError(AudioCppRequestError):
+    """The server is busy or out of memory (HTTP 503).
+
+    Every model slot is busy (``server_busy``), or a model load would not fit
+    in memory (``insufficient_memory``).
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class ModelParam:
     """A request option a model's spec declares (``include_params``).
@@ -91,6 +99,11 @@ class ModelInfo:
     # Whether the server reads a top-level ``instruct`` (audio.cpp
     # v0.9.2-drama3-base-small and later, which also list ``configured``).
     instruct_field: bool = False
+    # Backend device index the model runs on, and False for a model loaded
+    # through ``POST /v1/models/load`` (both v0.9.2-drama3-base-small+; None
+    # on older servers). Only shown in diagnostics.
+    device: int | None = None
+    configured: bool | None = None
 
     @property
     def streaming(self) -> bool:
@@ -100,6 +113,15 @@ class ModelInfo:
     def param(self, name: str) -> ModelParam | None:
         """Return the declared option ``name``, if there is one."""
         return next((p for p in self.params or () if p.name == name), None)
+
+    @property
+    def instruction_param(self) -> ModelParam | None:
+        """Return the model's instruction option, if it declares one.
+
+        Instruction-conditioned models (Qwen3-TTS, VoxCPM2 voice design)
+        name it ``instruct`` or ``instruction``.
+        """
+        return self.param("instruct") or self.param("instruction")
 
     @property
     def speed_param(self) -> ModelParam | None:
@@ -215,6 +237,8 @@ async def _error_from_response(response: aiohttp.ClientResponse) -> AudioCppErro
     message = f"HTTP {response.status}: {message}".strip()
     if response.status in (401, 403):
         return AudioCppAuthError(message)
+    if response.status == 503:
+        return AudioCppBusyError(message)
     return AudioCppRequestError(message)
 
 
@@ -276,6 +300,9 @@ class AudioCppClient:
         self._headers: dict[str, str] = (
             {"Authorization": f"Bearer {api_key}"} if api_key else {}
         )
+        # The server build from the last /health, e.g. "0.9.3 (1bbd8517)";
+        # None until then, or for a server that does not report it.
+        self.server_version: str | None = None
 
     @property
     def url(self) -> str:
@@ -332,6 +359,13 @@ class AudioCppClient:
         data = await self._get_json("/health")
         if not isinstance(data, dict) or data.get("status") != "ok":
             raise AudioCppRequestError("audio.cpp server did not report status ok")
+        # Since audio.cpp v0.9.3 /health reports its version and git commit.
+        version = data.get("version")
+        git = str(data.get("git") or "")[:8]
+        if version and git:
+            self.server_version = f"{version} ({git})"
+        else:
+            self.server_version = str(version or git) or None
         return data
 
     async def models(self) -> list[ModelInfo]:
@@ -352,6 +386,14 @@ class AudioCppClient:
                 mode=str(entry.get("mode", "")),
                 params=_parse_params(entry.get("params")),
                 instruct_field="configured" in entry,
+                device=entry["device"]
+                if isinstance(entry.get("device"), int)
+                else None,
+                configured=(
+                    entry["configured"]
+                    if isinstance(entry.get("configured"), bool)
+                    else None
+                ),
             )
             for entry in entries
             if isinstance(entry, dict) and entry.get("id")
@@ -478,7 +520,7 @@ class AudioCppClient:
         *,
         language: str | None = None,
         prompt: str | None = None,
-    ) -> str:
+    ) -> AsyncGenerator[tuple[str, bool]]:
         """Stream 16-bit PCM to a streaming model while it is captured.
 
         The body goes out with chunked transfer encoding and the transcript
@@ -486,6 +528,9 @@ class AudioCppClient:
         the user is still speaking. The terminating chunk is sent when
         ``audio`` is exhausted; the server treats a connection closed
         without it as an error rather than as end of speech.
+
+        Yields ``(text, final)``: the transcript so far after each delta,
+        then the full transcript once, with ``final`` True.
         """
         params = {
             "model": model,
@@ -503,7 +548,7 @@ class AudioCppClient:
                 if chunk:
                     yield chunk
 
-        deltas: list[str] = []
+        text = ""
         async with (
             self._request(
                 "POST",
@@ -520,8 +565,11 @@ class AudioCppClient:
             async for event in events:
                 event_type = event.get("type")
                 if event_type == "transcript.text.delta":
-                    deltas.append(str(event.get("delta") or ""))
+                    if delta := str(event.get("delta") or ""):
+                        text += delta
+                        yield text, False
                 elif event_type == "transcript.text.done":
-                    return str(event.get("text") or "")
+                    yield str(event.get("text") or ""), True
+                    return
         # The done event carries the full transcript; deltas are a fallback.
-        return "".join(deltas)
+        yield text, True

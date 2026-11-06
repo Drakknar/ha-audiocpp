@@ -24,6 +24,10 @@ CONF_VOICE: Final = "voice"
 CONF_SPEED: Final = "speed"
 CONF_SPLIT_SENTENCES: Final = "split_sentences"
 CONF_EXTRA_OPTIONS: Final = "extra_options"
+# Text for an instruction-conditioned model, and the name of the option the
+# model declares for it (``instruct`` or ``instruction``).
+CONF_INSTRUCTION: Final = "instruction"
+CONF_INSTRUCTION_OPTION: Final = "instruction_option"
 CONF_SAMPLE_RATE: Final = "sample_rate"
 CONF_CHANNELS: Final = "channels"
 CONF_LANGUAGE_HINT: Final = "language_hint"

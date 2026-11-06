@@ -57,6 +57,8 @@ from .api import (
 from .const import (
     CONF_CHANNELS,
     CONF_EXTRA_OPTIONS,
+    CONF_INSTRUCTION,
+    CONF_INSTRUCTION_OPTION,
     CONF_LANGUAGE_HINT,
     CONF_LANGUAGES,
     CONF_SAMPLE_RATE,
@@ -65,6 +67,7 @@ from .const import (
     CONF_STREAMING,
     CONF_VOICE,
     DOMAIN,
+    LANGUAGE_HINT_FULL,
     LANGUAGE_HINT_NONE,
     LANGUAGE_HINTS,
     PROBE_TEXT,
@@ -74,9 +77,13 @@ from .const import (
     TASK_CLONE,
     TASK_TTS,
 )
-from .options import check_speech_options
+from .options import check_speech_options, speech_extra
 
 _LOGGER = logging.getLogger(__name__)
+
+# ASR families that take a language hint. Nemotron Transcribe maps a tag such
+# as en-US or pt_BR to the language name itself (audio.cpp v0.9.4).
+_LANGUAGE_HINT_FAMILIES = frozenset({"nemotron_transcribe"})
 
 # Speed range offered when the model does not declare its own bounds.
 SPEED_MIN = 0.25
@@ -422,6 +429,10 @@ class TTSSubentryFlow(_EngineSubentryFlow):
             data.setdefault(CONF_STREAMING, False)
             if not self._can_stream:
                 data[CONF_STREAMING] = False
+            if data.get(CONF_INSTRUCTION) and (option := self._instruction_option):
+                data[CONF_INSTRUCTION_OPTION] = option
+            else:
+                data.pop(CONF_INSTRUCTION, None)
             extra = data.get(CONF_EXTRA_OPTIONS)
             checked = (data.get(CONF_SPEED), extra)
             if error := self._check_languages(data[CONF_LANGUAGES]):
@@ -452,7 +463,10 @@ class TTSSubentryFlow(_EngineSubentryFlow):
     def _suggested(self) -> dict[str, Any]:
         suggested = dict(self._data)
         model = self._model
-        # VoxCPM2 streaming requires retry_badcase=false (server README).
+        # VoxCPM2 streaming requires retry_badcase=false (server README). A
+        # voice preset in server.json can set it instead (audio.cpp
+        # v0.9.2-drama3-base-small and later), which this suggestion leaves
+        # alone once extra options are cleared.
         if (
             CONF_EXTRA_OPTIONS not in suggested
             and model is not None
@@ -503,8 +517,25 @@ class TTSSubentryFlow(_EngineSubentryFlow):
                     mode=NumberSelectorMode.BOX,
                 )
             )
+        if self._instruction_option is not None:
+            fields[probatio.Optional(CONF_INSTRUCTION)] = TextSelector(
+                TextSelectorConfig(multiline=True)
+            )
         fields[probatio.Optional(CONF_EXTRA_OPTIONS)] = ObjectSelector()
         return probatio.Schema(fields)
+
+    @property
+    def _instruction_option(self) -> str | None:
+        """Return the model's instruction option, or None to leave it out.
+
+        Kept as stored for a model the server no longer lists (or a server
+        that does not describe options), so a reconfigure keeps the text.
+        """
+        model = self._model
+        if model is not None and model.params is not None:
+            param = model.instruction_param
+            return param.name if param is not None else None
+        return self._data.get(CONF_INSTRUCTION_OPTION)
 
     def _speed_range(self) -> tuple[float, float] | None:
         """Return the speed field's bounds, or None to leave the field out.
@@ -529,9 +560,7 @@ class TTSSubentryFlow(_EngineSubentryFlow):
     def _check_options(self, data: dict[str, Any]) -> list[str]:
         if (model := self._model) is None:
             return []
-        return check_speech_options(
-            model, data.get(CONF_SPEED), data.get(CONF_EXTRA_OPTIONS)
-        )
+        return check_speech_options(model, data.get(CONF_SPEED), speech_extra(data))
 
     async def _probe(self, data: dict[str, Any]) -> str | None:
         """Synthesize a short phrase with these settings.
@@ -547,7 +576,7 @@ class TTSSubentryFlow(_EngineSubentryFlow):
                 PROBE_TEXT,
                 voice=data.get(CONF_VOICE) or None,
                 speed=data.get(CONF_SPEED),
-                extra=data.get(CONF_EXTRA_OPTIONS),
+                extra=speech_extra(data),
             )
         except AudioCppError as err:
             return str(err)
@@ -593,10 +622,16 @@ class STTSubentryFlow(_EngineSubentryFlow):
                     ),
                 )
             ] = BooleanSelector()
+        # The default sends no language, which some models reject; a family
+        # known to take one gets the full tag.
+        hint = (
+            LANGUAGE_HINT_FULL
+            if model is not None and model.family in _LANGUAGE_HINT_FAMILIES
+            else LANGUAGE_HINT_NONE
+        )
         fields[
             probatio.Required(
-                CONF_LANGUAGE_HINT,
-                default=self._data.get(CONF_LANGUAGE_HINT, LANGUAGE_HINT_NONE),
+                CONF_LANGUAGE_HINT, default=self._data.get(CONF_LANGUAGE_HINT, hint)
             )
         ] = SelectSelector(
             SelectSelectorConfig(

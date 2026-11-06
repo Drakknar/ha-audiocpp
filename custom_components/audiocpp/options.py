@@ -12,6 +12,7 @@ import difflib
 from typing import Any
 
 from .api import RESERVED_SPEECH_KEYS, ModelInfo, ModelParam
+from .const import CONF_EXTRA_OPTIONS, CONF_INSTRUCTION, CONF_INSTRUCTION_OPTION
 
 # Top-level speech fields the server copies into the model's options, mapped
 # to the option name it uses (``build_speech_request`` in the server's
@@ -37,6 +38,24 @@ _SERVER_FIELDS = frozenset({"voice", "voice_ref", "language", "return_text"})
 _INSTRUCT = "instruct"
 _SPEED_FIELDS = frozenset({"speed", "speaking_rate"})
 _OPTIONS = "options"
+
+
+def speech_extra(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return an engine's extra request fields, its instruction included.
+
+    The instruction goes in ``options`` under the name the model declares,
+    which every server passes to the model as is.
+    """
+    extra = dict(data.get(CONF_EXTRA_OPTIONS) or {})
+    if (text := data.get(CONF_INSTRUCTION)) and (
+        name := data.get(CONF_INSTRUCTION_OPTION)
+    ):
+        options = extra.get(_OPTIONS)
+        extra[_OPTIONS] = {
+            **(options if isinstance(options, Mapping) else {}),
+            name: text,
+        }
+    return extra
 
 
 def _suggest(key: str, model: ModelInfo) -> str:

@@ -26,6 +26,12 @@ MODELS = [
         "mode": "streaming",
     },
     {"id": "parakeet", "family": "parakeet_tdt", "task": "asr", "mode": "offline"},
+    {
+        "id": "nemotron-transcribe",
+        "family": "nemotron_transcribe",
+        "task": "asr",
+        "mode": "offline",
+    },
 ]
 # Request options each model declares (``include_params``, audio.cpp v0.9.1+).
 PARAMS = {
@@ -52,6 +58,7 @@ PARAMS = {
     ],
     "nemotron-stream": [],
     "parakeet": [],
+    "nemotron-transcribe": [{"name": "language", "type": "string"}],
 }
 
 
@@ -98,6 +105,8 @@ class FakeAudioCpp:
         # False acts as a server before v0.9.2-drama3-base-small, which lists
         # no `device`/`configured` and ignores a top-level `instruct`.
         self.instruct_field = True
+        # Set to make /health answer 503, as a server whose models are busy.
+        self.busy = False
         self.app = web.Application(middlewares=[self._auth])
         self.app.router.add_get("/health", self.health)
         self.app.router.add_get("/v1/models", self.models)
@@ -115,9 +124,18 @@ class FakeAudioCpp:
         return await handler(request)
 
     async def health(self, request: web.Request) -> web.Response:
-        """Answer /health."""
+        """Answer /health, with the build fields audio.cpp v0.9.3 added."""
+        if self.busy:
+            return _error(503, "server_busy")
         return web.json_response(
-            {"status": "ok", "backend": "cpu", "models": len(MODELS)}
+            {
+                "status": "ok",
+                "backend": "cpu",
+                "models": len(MODELS),
+                "version": "0.9.4",
+                "git": "1bbd8517c0ffee",
+                "git_date": "2026-11-01",
+            }
         )
 
     async def models(self, request: web.Request) -> web.Response:

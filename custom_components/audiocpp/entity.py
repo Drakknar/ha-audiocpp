@@ -36,5 +36,7 @@ class AudioCppEntity(Entity):
             name=subentry.title,
             manufacturer="audio.cpp",
             model=self.model,
+            # The server build from /health at setup (audio.cpp v0.9.3+).
+            sw_version=self.client.server_version,
             entry_type=DeviceEntryType.SERVICE,
         )

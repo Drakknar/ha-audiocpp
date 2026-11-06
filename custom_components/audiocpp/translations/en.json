@@ -85,6 +85,7 @@
             "streaming": "Use the streaming endpoint",
             "split_sentences": "Synthesize sentence by sentence",
             "speed": "Speed",
+            "instruction": "Instruction",
             "extra_options": "Extra request options"
           },
           "data_description": {
@@ -93,7 +94,8 @@
             "streaming": "Receive audio as it is generated (SSE PCM). Only offered for models the server runs with mode streaming.",
             "split_sentences": "Start speaking after the first sentence instead of waiting for the whole reply. Turn off if the model sounds better with the full text.",
             "speed": "Speech rate multiplier. Only shown for models with speed control, within the range the model declares. Servers before audio.cpp v0.9.1 do not say, so it is always shown there and the test synthesis tells you if the model rejects it.",
-            "extra_options": "Extra fields merged into every speech request, for example seed, max_tokens or an options object with model options. model, input and the format fields are set by the integration. Keys the model does not declare are flagged before the test synthesis."
+            "instruction": "How the model should speak, for example \"a calm, low male voice\". Only shown for models that take an instruction (such as Qwen3-TTS or VoxCPM2 voice design).",
+            "extra_options": "Extra fields merged into every speech request, for example seed, max_tokens or an options object with model options. model, input and the format fields are set by the integration. Keys the model does not declare are flagged before the test synthesis. Settings that belong to one voice can also live in its preset in the server's server.json (audio.cpp v0.9.2 and later)."
           }
         }
       }
@@ -134,7 +136,7 @@
           "data_description": {
             "languages": "Languages this engine offers to Home Assistant.",
             "streaming": "Send audio while it is captured (/v1/audio/transcriptions/live), so the model decodes as you speak. Off uploads the whole recording when you stop. Only offered for models the server runs with mode streaming.",
-            "language_hint": "Whether to pass the conversation language to the model. Some models take none and reject the field.",
+            "language_hint": "Whether to pass the conversation language to the model. Some models take none and reject the field. Nemotron Transcribe takes a full tag such as en-US, so it is suggested for it.",
             "prompt": "Optional context such as names or hotwords, for models that support it."
           }
         }

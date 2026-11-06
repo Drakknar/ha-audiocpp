@@ -1,6 +1,7 @@
 """Speech-to-text engines backed by audio.cpp."""
 
-from collections.abc import AsyncIterable
+from collections.abc import AsyncGenerator, AsyncIterable
+from contextlib import aclosing
 import logging
 from typing import TYPE_CHECKING, override
 
@@ -103,21 +104,28 @@ class AudioCppSTTEntity(stt.SpeechToTextEntity, AudioCppEntity):
         return None
 
     @override
-    async def async_process_audio_stream(
+    async def async_process_audio_stream_with_progress(
         self, metadata: stt.SpeechMetadata, stream: AsyncIterable[bytes]
-    ) -> stt.SpeechResult:
+    ) -> AsyncGenerator[stt.PartialSpeechResult | stt.SpeechResult]:
         """Transcribe the audio stream.
 
-        Home Assistant delivers raw PCM even when the format says WAV, so the
-        file path adds the header itself.
+        The live endpoint yields the transcript so far as partial results
+        while the user speaks. Home Assistant delivers raw PCM even when the
+        format says WAV, so the file path adds the header itself.
         """
         fmt = PcmFormat(metadata.sample_rate.value, metadata.channel.value)
         language = self._language(metadata.language)
+        text = ""
         try:
             if self._streaming:
-                text = await self.client.transcribe_live(
-                    self.model, stream, fmt, language=language, prompt=self._prompt
-                )
+                async with aclosing(
+                    self.client.transcribe_live(
+                        self.model, stream, fmt, language=language, prompt=self._prompt
+                    )
+                ) as results:
+                    async for text, final in results:
+                        if not final and text.strip():
+                            yield stt.PartialSpeechResult(text.strip())
             else:
                 pcm = bytearray()
                 async for chunk in stream:
@@ -130,5 +138,6 @@ class AudioCppSTTEntity(stt.SpeechToTextEntity, AudioCppEntity):
                 )
         except AudioCppError as err:
             _LOGGER.error("audio.cpp STT failed with model %s: %s", self.model, err)
-            return stt.SpeechResult(None, stt.SpeechResultState.ERROR)
-        return stt.SpeechResult(text.strip(), stt.SpeechResultState.SUCCESS)
+            yield stt.SpeechResult(None, stt.SpeechResultState.ERROR)
+            return
+        yield stt.SpeechResult(text.strip(), stt.SpeechResultState.SUCCESS)

@@ -22,7 +22,6 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .api import AudioCppError, PcmFormat, build_wav, wav_header
 from .const import (
     CONF_CHANNELS,
-    CONF_EXTRA_OPTIONS,
     CONF_LANGUAGES,
     CONF_SAMPLE_RATE,
     CONF_SPEED,
@@ -32,6 +31,7 @@ from .const import (
     SUBENTRY_TTS,
 )
 from .entity import AudioCppEntity
+from .options import speech_extra
 
 if TYPE_CHECKING:
     from . import AudioCppConfigEntry
@@ -111,7 +111,7 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
         self._split: bool = data.get(CONF_SPLIT_SENTENCES, True)
         self._voice: str | None = data.get(CONF_VOICE) or None
         self._speed: float | None = data.get(CONF_SPEED)
-        self._extra: dict[str, Any] = data.get(CONF_EXTRA_OPTIONS) or {}
+        self._extra: dict[str, Any] = speech_extra(data)
         self._stream_format: PcmFormat | None = (
             PcmFormat(data[CONF_SAMPLE_RATE], data.get(CONF_CHANNELS, 1))
             if data.get(CONF_SAMPLE_RATE)

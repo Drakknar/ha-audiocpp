@@ -12,15 +12,17 @@ This folder (`custom_components/audiocpp/`) is self-contained: it holds the code
 
 ```
 <repo root>/
-  hacs.json, README.md            HACS metadata (min HA 2026.10.0) and user docs
+  hacs.json, README.md            HACS metadata (min HA 2026.11.0) and user docs
   custom_components/audiocpp/     <- this folder
     __init__.py   Entry setup: builds the client, checks /health (ConfigEntryAuthFailed on 401/403,
-                  ConfigEntryNotReady on other failures),
-                  raises/clears engine-option repair issues, forwards STT+TTS, update listener
+                  ConfigEntryNotReady with retry_after=60 on 503, ConfigEntryNotReady otherwise),
+                  refreshes engine-option repair issues, forwards STT+TTS, update listener
                   reloads the entry on any subentry change
     api.py        AudioCppClient (aiohttp), SSE parser, WAV helpers, URL normalisation, errors,
                   ModelInfo/ModelParam (declared request options)
-    options.py    check_speech_options: speed + extra_options vs the model's declared options
+    options.py    check_speech_options: speed + extra_options vs the model's declared options;
+                  speech_extra: extra_options with the instruction merged into `options`
+    diagnostics.py  Server health + models (device/configured), engines; URL and key redacted
     config_flow.py  Server flow (user/reconfigure/reauth) + subentry flows "tts" and "stt"
     entity.py     Base entity: one device per subentry, unique_id = subentry_id
     tts.py        TTS entity, sentence splitter
@@ -38,7 +40,7 @@ Home Assistant ignores `CLAUDE.md`, `pytest.ini` and `tests/` when the folder is
 ## Data model
 
 - **Config entry:** one audio.cpp server. Data is `url` (normalized) and an optional `api_key`.
-- **Subentry `tts`:** `model`, `languages`, `streaming`, `split_sentences`, and the optional `voice`, `speed` and `extra_options` (dict). Also `sample_rate` and `channels`, which the probe fills in.
+- **Subentry `tts`:** `model`, `languages`, `streaming`, `split_sentences`, and the optional `voice`, `speed`, `instruction` and `extra_options` (dict). With `instruction` comes `instruction_option`, the option name the model declares for it (`instruct` or `instruction`). Also `sample_rate` and `channels`, which the probe fills in.
 - **Subentry `stt`:** `model`, `languages`, `streaming`, `language_hint` (`none`/`code`/`full`), and an optional `prompt`.
 - **Title:** the engine name the user enters becomes the subentry title (`CONF_NAME` is removed from the stored data).
 
@@ -46,7 +48,7 @@ Home Assistant ignores `CLAUDE.md`, `pytest.ini` and `tests/` when the folder is
 
 These come from the repository source (commit `c6b104e`, 2026-10-04), mainly `app/server/README.md` and `app/server/runtime.cpp`. Rechecked against `v0.9.1` (2026-10-12): none of the items below changed. Rechecked against `v0.9.2-drama3-base-small` (2026-10-19): only additions, noted below.
 
-- **`GET /health`:** returns `{"status":"ok","backend":..,"models":N,...}`.
+- **`GET /health`:** returns `{"status":"ok","backend":..,"models":N,...}`. Since v0.9.3 also `version`, `git` and `git_date`; the client keeps `"<version> (<git[:8]>)"` as `server_version`, shown as each engine device's `sw_version`.
 - **`GET /v1/models`:** returns `{"data":[{id, family, task, mode, loaded, path}]}`.
   - Since `v0.9.2-drama3-base-small`, entries also carry `device` (the effective backend device index) and `configured` (false for a model loaded through `POST /v1/models/load`). `/health` reports no version, so `ModelInfo.instruct_field` uses the presence of `configured` to recognise that server.
   - Since v0.9.1, `?include_params=true` adds `params`: the request options the model's spec declares (`name`, `type`, `required`, `description`, `default`/`min`/`max`, enum `values`). A model declaring none returns `[]`; older servers omit the key (`ModelInfo.params` is then None). The list describes options and does not validate them. The client always sends the flag.
@@ -111,13 +113,19 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 - **Declared options (issues #2 and #4):** with a v0.9.1+ server, the TTS speed field appears only when the model declares `speed` or `speaking_rate`, bounded by the declared min/max (fallback 0.25–4.0, and a min of 0 or less is ignored because speed must be positive). Clone models get it the same way. A typed-in model the server doesn't list, or an older server, gets the old always-on field.
   - **Save check:** before the probe, `check_speech_options` flags unknown option names (with a difflib suggestion), declared options sent at the top level, enum values not in `values`, and numbers outside min/max. It runs only when the server reports params.
   - **Override:** because `params` only describes options, submitting the flagged speed and extra options again unchanged skips the check (`TTSSubentryFlow._flagged`), and the probe decides.
-  - **Repair issue:** every entry setup (and so every reload or subentry change) runs the same check on each TTS subentry that sets speed or extra options. Models are listed only when at least one such engine exists. Problems raise the non-fixable warning `engine_options_<entry_id>_<subentry_id>` (translation key `engine_options`). Issues for engines that are fine again or removed are deleted, and `async_remove_entry` clears them all. A failed model listing only logs at debug level and never blocks setup.
+  - **Repair issue:** every entry setup (and so every reload or subentry change) runs the same check on each TTS subentry that sets speed, an instruction or extra options. Models are listed only when at least one such engine exists. Problems raise the non-fixable warning `engine_options_<entry_id>_<subentry_id>` (translation key `engine_options`), linked to the entry with `config_entry_id` (HA 2026.11). The check runs inside `ir.async_refresh_issues` matched by that id prefix, so issues of engines that are fine again or removed go, a user's "ignore" on valid ones stays, and unlinked issues from before 0.4.0 are cleaned up too. HA removes linked issues with the entry and hides them while it is disabled, which replaced `async_remove_entry`. A failed model listing only logs at debug level, never blocks setup, and starts no refresh, so existing issues stay.
   - **Not done:** turning declared options into proper form fields instead of free-form `extra_options` (the "Further" item of issue #2).
 - **API key (owner's decision, 2026-10-24):**
   - **Reconfigure:** a blank key field keeps the stored key only while the URL's host and port (scheme default if none) stay the same, so the key is never sent to a different server. For a different host or port no key is stored, and a 401/403 from the new server shows `api_key_for_new_server`, which asks for its key.
   - **Reauth:** a 401/403 from `/health` at setup raises `ConfigEntryAuthFailed`. `reauth_confirm` asks for a new key, checks it against the stored URL, and stores it. A failed entry has no update listener, so the flow uses `async_update_reload_and_abort`; an entry that is still loaded (reauth started by hand) uses `async_update_and_abort` and its update listener reloads it, which avoids the 2026.12 deprecation noted above.
-- **Language hint:** the default `language_hint` is `none`, because some models reject a `language` field. The audio.cpp docs show `en` for multipart and `en-US` for Nemotron live.
-- **Minimum version:** 2026.10.0 (raised from 2026.9.0 on 2026-10-30, the user's decision, for probatio: core used voluptuous until 2026.10).
+- **Language hint:** the default `language_hint` is `none`, because some models reject a `language` field. The audio.cpp docs show `en` for multipart and `en-US` for Nemotron live. Since v0.9.4 ([#1190](https://github.com/0xShug0/audio.cpp/pull/1190)) Nemotron Transcribe (family `nemotron_transcribe`) maps regional tags (`en-US`, `pt_BR`) to a language name itself, so the STT form defaults to `full` for that family.
+- **Instruction (issue #7):** shown only when the model declares `instruct` or `instruction` (Qwen3-TTS, VoxCPM2 voice design), or, for a model the server doesn't describe, when one was stored. It is sent inside `options` under the declared name, which every server passes to the model as is, so it never collides with a top-level `instruct`/`instructions` in the extra options. A field value wins over the same key in `extra_options.options`. The repair check covers it through `speech_extra`.
+- **Voice preset options:** since `v0.9.2-drama3-base-small` a preset can carry `options`. The README points there for per-voice settings such as VoxCPM2's `retry_badcase`; the flow still suggests the extra option.
+- **Busy server:** a 503 from `/health` at setup (`server_busy`/`insufficient_memory`) raises `ConfigEntryNotReady(retry_after=60)`. HA keeps its backoff as the floor, so retries come after at least a minute instead of 5 s. audio.cpp sends no `Retry-After` header.
+- **Partial transcripts:** the STT entity implements `async_process_audio_stream_with_progress` (HA 2026.11). The live endpoint's deltas are yielded as `PartialSpeechResult` with the transcript so far; the file path yields only the final result. `async_process_audio_stream` is not implemented: HA calls entities only through `internal_async_process_audio_stream(_with_progress)`. No Assist pipeline code read partials in 2026.11.0, so the payoff comes when the pipeline or frontend does.
+- **Diagnostics:** `/health`, `/v1/models` (with `device`/`configured`), `server_version` and each engine's data. The URL and API key are redacted.
+- **Minimum version:** 2026.11.0 (raised from 2026.10.0 on 2026-11-06 for the issue-registry refresh, `config_entry_id` on issues, `PartialSpeechResult` and `retry_after`; from 2026.9.0 on 2026-10-30 for probatio). CI then runs one harness, core's `pytest-homeassistant`; add a second venv again once the minimum falls behind the current release.
+- **Manifest metadata (issue #25):** `categories: ["ai_voice.speech"]` and `connectivity: ["network"]`, as core's speech integrations use them for the new marketplace listing.
 - **SSE parsing:** done by hand rather than with `readline`, because a base64 audio line can exceed aiohttp's line-length limit.
 
 ## Verification status
@@ -125,6 +133,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 - **Automated tests:** `pytest` gives 7 passed against HA 2026.9.4 and 2026.10.1 on Python 3.14 (2026-10-12; `test_tts_through_home_assistant` needs an `ffmpeg` binary on PATH and is skipped without one). The tests use a fake server that follows the documented wire format, including full-duplex live STT.
   - **Declared options (2026-10-17):** 3 new tests (speed field, save check, repair issue). The fake server reports `PARAMS` per model, and `FakeAudioCpp.params = None` acts as a pre-v0.9.1 server. 9 passed, ffmpeg test skipped, on HA 2026.10.1 on the Windows PC.
   - **audio.cpp `v0.9.2-drama3-base-small` (2026-10-19):** the fake server lists `device`/`configured`, and rejects a top-level `instruct` sent together with `instructions` (`FakeAudioCpp.instruct_field = False` acts as an older server). 1 new test. 10 passed, ffmpeg test skipped, on HA 2026.10.1 on Python 3.14. Rebased onto 0.3.0 (2026-10-27): 15 passed, ffmpeg test skipped.
+  - **0.4.0 (2026-11-06):** 6 new tests (instruction field, repair issue linked + legacy cleanup + removed with the entry, busy retry, server version + diagnostics, Nemotron Transcribe hint) and partials in the live STT test. 20 passed, ffmpeg test skipped, on HA 2026.11.0 with `pytest-homeassistant` 2026.11.0 from PyPI on the Windows PC. That harness has no option to fail tests on deprecated-API reports for custom integrations (checked 2026-11-06), so issue #25's second idea isn't possible yet.
   - **HA 2026.11.0 (2026-11-04):** `pytest-homeassistant-custom-component` stops at 0.13.375 (HA 2026.10.4) and fails to import on 2026.11, because core removed a private logger helper it imports. Its README now calls it broken and points to core's own `pytest-homeassistant` ([#190049](https://github.com/home-assistant/core/pull/190049)). `tests/conftest.py` loads the old harness by name only when `pytest_homeassistant` isn't installed (the new one registers itself). It also points `hass_config_dir` at `hass_tmp_config_dir`, because the new `hass` fixture uses `tests/testing_config` without creating it, and the TTS cache then fails to initialise. `pytest.ini` adds `-p no:respx` so HA can alias `httpx` to `httpx2` before respx imports it. 16 passed (ffmpeg test included) on HA 2026.11.0 with `pytest-homeassistant` installed from the core tag, and on HA 2026.10.4 with 0.13.375.
   - **Windows runs:** use stub `fcntl.py`/`resource.py` in site-packages and a `-p` plugin that turns `pytest_socket.disable_socket` into a no-op. The hass fixture's teardown then raises `WinError 10022` on some tests, which is an environment issue.
 - **Code review (2026-10-05):** found 2 issues, both fixed and covered by tests. (1) Reconfiguring the server with a blank API key dropped the stored key; a blank key now keeps it (since 2026-10-24 only for the same host and port). (2) Credentials in the URL leaked into the entry title and logs; `normalize_url` now rejects them.
@@ -161,7 +170,6 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
   - **Verified:** the GGUF filename `omnivoice-q8_0.gguf` matches the package metadata.
   - **Since then, the author's own `server.json`** switched Pocket TTS to `-bf16.gguf` files in `offline` mode.
 - **Possible improvements:**
-  - Diagnostics.
   - More STT sample rates.
   - Filtering voices by language.
   - Translations other than English.
@@ -169,15 +177,12 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 ## Running the tests
 
 ```bash
-# Python 3.14 is needed for HA 2026.9.x to 2026.11.x
-# HA 2026.11 and later: core's harness, same version as homeassistant
+# Python 3.14; core's harness has the same version as homeassistant
 pip install homeassistant==2026.11.0 pytest-homeassistant==2026.11.0 mutagen ha-ffmpeg
-# HA 2026.10.x: the old harness (don't install both)
-pip install homeassistant==2026.10.1 pytest-homeassistant-custom-component==0.13.372 mutagen ha-ffmpeg
 cd custom_components/audiocpp && pytest
 ```
 
-On 2026-11-04 PyPI had only `pytest-homeassistant` 2026.11.0b4–b6. Until 2026.11.0 is published, install it from the core tag: `pip install "git+https://github.com/home-assistant/core@2026.11.0#subdirectory=packages/pytest-homeassistant"`. The PyPI `pytest-homeassistant` 0.1.x is an unrelated older project.
+The PyPI `pytest-homeassistant` 0.1.x is an unrelated older project. Don't install `pytest-homeassistant-custom-component` alongside core's harness (it stopped at HA 2026.10.4).
 
 `pytest.ini` puts the repository root on the path, so the folder must sit inside a `custom_components/` directory (the repository layout, or a Home Assistant config) for the imports to resolve. The tests use the harness's `socket_enabled` fixture because the fake server is real loopback HTTP.
 
