@@ -178,10 +178,14 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 ## Running the tests
 
 ```bash
-# Python 3.14; core's harness has the same version as homeassistant
-pip install homeassistant==2026.11.0 pytest-homeassistant==2026.11.0 mutagen ha-ffmpeg
+# Python >=3.14.2 (Home Assistant 2026.11's requires-python); core's harness has the same version as homeassistant
+pip install homeassistant==2026.11.0 pytest-homeassistant==2026.11.0
+# mutagen and ha-ffmpeg at the versions that Home Assistant release pins:
+pip install -c "$(python -c 'import homeassistant, pathlib; print(pathlib.Path(homeassistant.__file__).parent / "package_constraints.txt")')" mutagen ha-ffmpeg
 cd custom_components/audiocpp && pytest
 ```
+
+CI (`.github/workflows/checks.yml`) installs the same way with `uv`: `homeassistant` and `pytest-homeassistant` first, then `mutagen` and `ha-ffmpeg` with `-c` Home Assistant's `package_constraints.txt` (both are listed there).
 
 The PyPI `pytest-homeassistant` 0.1.x is an unrelated older project. Don't install `pytest-homeassistant-custom-component` alongside core's harness (it stopped at HA 2026.10.4).
 

@@ -30,12 +30,19 @@ jobs:
       # The minimum Home Assistant comes from hacs.json; it is also the current release,
       # so one run covers both (add a second venv once the minimum falls behind).
       # Core's harness has the same version as homeassistant (the PyPI 0.1.x is an
-      # unrelated project). mutagen and ha-ffmpeg: needed by the tts and stt platforms.
+      # unrelated project). mutagen and ha-ffmpeg: needed by the tts and stt platforms,
+      # installed at the versions this Home Assistant pins (package_constraints.txt;
+      # both are listed there). Python: Home Assistant's requires-python floor
+      # (>=3.14.2), within 3.14.
       - name: Install the test harness
         run: |
           ha=$(jq -er .homeassistant hacs.json)
-          uv venv -p 3.14 "$RUNNER_TEMP/venv"
-          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "homeassistant==$ha" "pytest-homeassistant==$ha" mutagen ha-ffmpeg
+          uv venv -p '>=3.14.2,<3.15' "$RUNNER_TEMP/venv"
+          export VIRTUAL_ENV=$RUNNER_TEMP/venv
+          uv pip install "homeassistant==$ha" "pytest-homeassistant==$ha"
+          constraints=$("$VIRTUAL_ENV/bin/python" -c 'import homeassistant, pathlib; print(pathlib.Path(homeassistant.__file__).parent / "package_constraints.txt")')
+          test -f "$constraints"
+          uv pip install -c "$constraints" mutagen ha-ffmpeg
 
       - name: pytest (minimum Home Assistant)
         working-directory: custom_components/audiocpp

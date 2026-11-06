@@ -48,8 +48,8 @@ Status:
 `ha-audiocpp` (`custom_components/audiocpp/`) provides TTS and STT entities for an audio.cpp server. Its dependencies are Home Assistant core and the audio.cpp server's HTTP API.
 
 - **Tests:** follow "Running the tests" in CLAUDE.md, with the new Home Assistant version.
-  - Make a venv with the Python version that Home Assistant release requires: `uv venv -p 3.x "$RUNNER_TEMP/venv"`.
-  - Install `homeassistant==<new>`, core's test harness `pytest-homeassistant==<new>` (the same version), `mutagen` and `ha-ffmpeg`. Never install `pytest-homeassistant-custom-component` alongside it: that harness stopped at Home Assistant 2026.10.4.
+  - Make a venv with the Python version that Home Assistant release requires (its `requires-python`, e.g. `uv venv -p '>=3.14.2,<3.15' "$RUNNER_TEMP/venv"` for 2026.11).
+  - Install `homeassistant==<new>` and core's test harness `pytest-homeassistant==<new>` (the same version); then, in a second `uv pip install` with `-c <site-packages>/homeassistant/package_constraints.txt` (the new release's own pins, located with `python -c "import homeassistant, pathlib; print(pathlib.Path(homeassistant.__file__).parent / 'package_constraints.txt')"`), `mutagen` and `ha-ffmpeg`. Never install `pytest-homeassistant-custom-component` alongside it: that harness stopped at Home Assistant 2026.10.4.
   - If PyPI doesn't have `pytest-homeassistant==<new>` yet, install it from the core tag: `uv pip install "pytest-homeassistant@git+https://github.com/home-assistant/core@<new>#subdirectory=packages/pytest-homeassistant"`, and say so in the report. The PyPI `pytest-homeassistant` 0.1.x is an unrelated project.
   - Run `pytest` in `custom_components/audiocpp`.
   - CI (`.github/workflows/checks.yml`) tests only the minimum Home Assistant in `hacs.json`. If the new release is newer than that minimum, say in the report that CI only tests the minimum, not this release.
