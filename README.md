@@ -89,7 +89,7 @@ The tests run against a fake server that implements the audio.cpp wire format:
 ```bash
 pip install homeassistant==2026.11.0 pytest-homeassistant==2026.11.0
 # mutagen and ha-ffmpeg at the versions that Home Assistant release pins:
-pip install -c "$(python -c 'import homeassistant, pathlib; print(pathlib.Path(homeassistant.__file__).parent / "package_constraints.txt")')" mutagen ha-ffmpeg
+pip install -c "$(python -c 'import importlib.util, pathlib; print(pathlib.Path(importlib.util.find_spec("homeassistant").origin).parent / "package_constraints.txt")')" mutagen ha-ffmpeg
 cd custom_components/audiocpp && pytest
 ```
 

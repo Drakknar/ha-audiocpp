@@ -181,7 +181,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 # Python >=3.14.2 (Home Assistant 2026.11's requires-python); core's harness has the same version as homeassistant
 pip install homeassistant==2026.11.0 pytest-homeassistant==2026.11.0
 # mutagen and ha-ffmpeg at the versions that Home Assistant release pins:
-pip install -c "$(python -c 'import homeassistant, pathlib; print(pathlib.Path(homeassistant.__file__).parent / "package_constraints.txt")')" mutagen ha-ffmpeg
+pip install -c "$(python -c 'import importlib.util, pathlib; print(pathlib.Path(importlib.util.find_spec("homeassistant").origin).parent / "package_constraints.txt")')" mutagen ha-ffmpeg
 cd custom_components/audiocpp && pytest
 ```
 
