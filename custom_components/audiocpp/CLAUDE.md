@@ -22,7 +22,8 @@ This folder (`custom_components/audiocpp/`) is self-contained: it holds the code
                   ModelInfo/ModelParam (declared request options)
     options.py    check_speech_options: speed + extra_options vs the model's declared options;
                   speech_extra: extra_options with the instruction merged into `options`
-    diagnostics.py  Server health + models (device/configured), engines; URL and key redacted
+    diagnostics.py  Server health + models (device/configured), engines; URL (also in errors),
+                  key and extra_options redacted; "not loaded" without network calls
     config_flow.py  Server flow (user/reconfigure/reauth) + subentry flows "tts" and "stt"
     entity.py     Base entity: one device per subentry, unique_id = subentry_id
     tts.py        TTS entity, sentence splitter

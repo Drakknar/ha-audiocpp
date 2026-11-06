@@ -73,7 +73,7 @@ With a server older than v0.9.1, the speed field is always shown and only the te
 - **Test synthesis failed:** the form shows the server's own error message. Usually the model doesn't support a setting such as speed or voice.
 - **Repair "TTS engine … has settings … does not accept":** each time the server entry loads, saved engines are checked against what the server says each model takes. This usually follows a server upgrade that renamed an option. Reconfigure the engine to fix it, or ignore the issue if the model does take the setting.
 - **Server busy:** if the server answers 503 at startup (every model busy, or not enough memory to load one), Home Assistant retries the entry after a minute instead of within seconds.
-- **Which server build an engine runs on:** each engine's device page shows the server's version and commit (audio.cpp v0.9.3 or newer). **Download diagnostics** on the server entry adds the server's health report and model list, including the backend device each model runs on; the URL and API key are redacted.
+- **Which server build an engine runs on:** each engine's device page shows the server's version and commit (audio.cpp v0.9.3 or newer). **Download diagnostics** on the server entry adds the server's health report and model list, including the backend device each model runs on; the URL (also in error messages), the API key and the engines' extra options are redacted.
 - **Debug logs:** add this to `configuration.yaml`:
 
   ```yaml

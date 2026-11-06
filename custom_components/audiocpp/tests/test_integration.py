@@ -5,12 +5,13 @@ from collections.abc import AsyncGenerator
 import io
 import itertools
 import shutil
+from urllib.parse import urlsplit
 import wave
 
 from aiohttp.test_utils import TestServer
 import pytest
 
-from custom_components.audiocpp.api import normalize_url
+from custom_components.audiocpp.api import AudioCppConnectionError, normalize_url
 from custom_components.audiocpp.const import DOMAIN
 from custom_components.audiocpp.diagnostics import async_get_config_entry_diagnostics
 from custom_components.audiocpp.tests.fake_server import (
@@ -881,6 +882,66 @@ async def test_server_version_and_diagnostics(hass: HomeAssistant, fake) -> None
     assert diagnostics["engines"] == [
         {"type": "stt", "title": "Parakeet", "data": dict(sub.data)}
     ]
+
+
+async def test_diagnostics_error_hides_server(
+    hass: HomeAssistant, fake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that a failed server call names neither the URL nor the host."""
+    _, url = fake
+    entry = await _add_server(hass, url)
+    client = entry.runtime_data
+    host = urlsplit(client.url).hostname
+    assert host
+
+    async def unreachable() -> dict:
+        # The client's message, around aiohttp's, which names the host.
+        raise AudioCppConnectionError(
+            f"Error talking to audio.cpp at {client.url}: "
+            f"Cannot connect to host {host}:1 ssl:default"
+        )
+
+    monkeypatch.setattr(client, "health", unreachable)
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    error = diagnostics["server"]["error"]
+    assert client.url not in error and host not in error
+    assert error == (
+        "Error talking to audio.cpp at **REDACTED**: "
+        "Cannot connect to host **REDACTED**:1 ssl:default"
+    )
+
+
+async def test_diagnostics_not_loaded(hass: HomeAssistant, fake) -> None:
+    """Test diagnostics of an entry waiting to retry, and redacted options."""
+    server, url = fake
+    entry = await _add_server(hass, url)
+    result = await _add_engine(
+        hass,
+        entry,
+        "tts",
+        "kokoro",
+        {
+            "name": "Kokoro",
+            "languages": ["en"],
+            "split_sentences": True,
+            "extra_options": {"seed": 7},
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    server.busy = True
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+    requests = len(server.auth_headers)
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert len(server.auth_headers) == requests
+    assert diagnostics["server"] == {"error": "not loaded"}
+    assert diagnostics["server_version"] is None
+    assert diagnostics["entry"]["url"] == "**REDACTED**"
+    (engine,) = diagnostics["engines"]
+    assert engine["data"]["model"] == "kokoro"
+    assert engine["data"]["extra_options"] == "**REDACTED**"
 
 
 async def test_stt_live_and_file(hass: HomeAssistant, fake) -> None:
