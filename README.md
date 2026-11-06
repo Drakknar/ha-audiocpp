@@ -51,6 +51,30 @@ It then runs a short test synthesis ("Hello."). This catches settings the model 
 
 With a server older than v0.9.1, the speed field is always shown and only the test synthesis checks the settings.
 
+### Setting model options per call
+
+The extra request options are fixed for an engine. To change a model option from one `tts.speak` call to the next, pass it in the action's `options`, next to `voice`:
+
+```yaml
+action: tts.speak
+target:
+  entity_id: tts.breeze
+data:
+  media_player_entity_id: media_player.kitchen
+  message: "The oven is ready."
+  options:
+    voice: Maia.wav
+    instruct: Say it warmly, with a light smile.
+    guidance_scale: 2
+    seed: 5
+```
+
+This works for anything that calls the `tts.speak` action: scripts, automations, and programs using Home Assistant's API. The voice assistant (Assist) passes the engine only its pipeline's voice, so Assist replies keep using the engine's extra request options.
+
+Which options an engine accepts is read from the server, so it follows the model: whatever its spec lists as a request option, such as `seed`, `temperature`, `guidance_scale` or `instruct`, with the type, minimum, maximum and allowed values the spec gives. Values from a template or a text field arrive as text and are converted to the declared type; an empty value is ignored, so a script can leave a field unset. A value in the call wins over the same option in the engine's extra request options.
+
+A value the model does not accept fails the action with a message that says what is wrong, for example "`seed` must be at least 0", before anything is sent to the server. Options that name a file on the server (path types) cannot be set this way, and neither can `speed` (an engine setting) or `language` (the language of the call); naming one fails with the reason. The list is read when the engine loads, so a call made in the first moments after Home Assistant starts may still see only `voice`. With a server older than v0.9.1, which does not list options, only `voice` is accepted.
+
 ### STT engine settings
 
 | Setting | What it does |

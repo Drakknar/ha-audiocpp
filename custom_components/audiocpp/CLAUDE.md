@@ -108,6 +108,7 @@ Verified against the source of the 2026.9.4 and 2026.10.1 tags and by running th
 
 ## Design decisions
 
+- **Per-call model options:** `tts.speak` `options` may name any request option the model declares (`ModelInfo.params`, read in the entity's background `_async_load_options` into `supported_options`). `options.call_options` converts by declared type, checks min/max/values with `_check_value`, and raises `ValueError`, which `tts._extra_for` turns into `ServiceValidationError` before synthesis starts. Path-typed options and `speed`/`speaking_rate`/`language` are listed but refused with a reason, so the caller gets that message instead of HA's generic "invalid options". Session and load options are not per call.
 - **Probe on TTS save:** synthesize `"Hello."` without streaming. This validates the voice, speed and extra options, and stores `sample_rate` and `channels` for streaming. The cost is one inference, plus a model load if the server uses `lazy_load`.
 - **Sentence splitting:** on by default, in both modes. A sentence ends at terminal punctuation followed by whitespace, at CJK punctuation, or at a blank line. Fragments under 20 characters are merged into the next sentence. Without streaming, each sentence's WAV must have the same format as the first, or the request raises an error.
 - **Reserved request fields:** `extra_options` cannot override `model`, `input`, `stream`, `stream_format` or `response_format`.

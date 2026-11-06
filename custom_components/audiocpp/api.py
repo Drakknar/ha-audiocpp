@@ -74,8 +74,8 @@ class AudioCppBusyError(AudioCppRequestError):
 class ModelParam:
     """A request option a model's spec declares (``include_params``).
 
-    Only what the option check uses is kept; the server also sends the
-    option's type, description, default and whether it is required.
+    Only what the option check and per-call options use is kept; the server
+    also sends whether the option is required.
     """
 
     name: str
@@ -83,6 +83,10 @@ class ModelParam:
     max: float | None = None
     # Allowed values of an enum option; empty for any other type.
     values: tuple[str, ...] = ()
+    # The spec's type: int, float, bool, enum, string, path, audio_path, ...
+    type: str = ""
+    default: Any = None
+    description: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +227,13 @@ def _parse_params(rows: Any) -> tuple[ModelParam, ...] | None:
                 values=tuple(str(v) for v in values)
                 if isinstance(values, list)
                 else (),
+                type=row["type"] if isinstance(row.get("type"), str) else "",
+                default=row.get("default"),
+                description=(
+                    row["description"]
+                    if isinstance(row.get("description"), str)
+                    else ""
+                ),
             )
         )
     return tuple(params)

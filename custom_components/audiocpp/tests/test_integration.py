@@ -26,7 +26,7 @@ from homeassistant.components.tts.const import DATA_TTS_MANAGER
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import (
     device_registry as dr,
     entity_registry as er,
@@ -519,6 +519,183 @@ async def test_offline_tts_and_probe_error(hass: HomeAssistant, fake) -> None:
         and request["voice"] == "alba"
     )
     assert "stream_format" not in request
+
+
+async def _tts_entity(hass, entry, model: str, settings: dict):
+    result = await _add_engine(hass, entry, "tts", model, settings)
+    assert result["type"] is FlowResultType.CREATE_ENTRY, result
+    await hass.async_block_till_done(wait_background_tasks=True)
+    return _entity(hass, tts.DATA_COMPONENT, "tts", _subentry(entry, "tts").subentry_id)
+
+
+async def _speak(entity, **options) -> bytes:
+    response = await entity.async_stream_tts_audio(
+        TTSAudioRequest(
+            language="en", options=options, message_gen=_text("Hello there.")
+        )
+    )
+    return await _collect(response)
+
+
+async def test_call_options_follow_model(hass: HomeAssistant, fake) -> None:
+    """A call may set the options the model declares, and only those."""
+    server, url = fake
+    entry = await _add_server(hass, url)
+    entity = await _tts_entity(
+        hass,
+        entry,
+        "kokoro",
+        {
+            "name": "Kokoro",
+            "languages": ["en"],
+            "split_sentences": False,
+            "extra_options": {"options": {"seed": 7}},
+        },
+    )
+    # What the model declares, and nothing it does not: kokoro has no `instruct`.
+    assert entity.supported_options == ["voice", "seed", "source_audio", "speed"]
+
+    # HA passes strings from a script: they are converted by declared type, the
+    # call wins over the engine's seed, empty values are skipped.
+    server.speech_requests.clear()
+    await _speak(entity, seed="9", speed="")
+    (request,) = server.speech_requests
+    assert request["options"] == {"seed": 9}
+    server.speech_requests.clear()
+    await _speak(entity)
+    assert server.speech_requests[0]["options"] == {"seed": 7}
+
+
+async def test_call_options_override_engine_instruction(
+    hass: HomeAssistant, fake
+) -> None:
+    """The engine's instruction is the default; a call's value replaces it once."""
+    server, url = fake
+    entry = await _add_server(hass, url)
+    entity = await _tts_entity(
+        hass,
+        entry,
+        "kitt-en",
+        {
+            "name": "KITT",
+            "languages": ["en"],
+            "split_sentences": False,
+            "instruction": "a calm, low voice",
+            "extra_options": {"options": {"seed": 3}},
+        },
+    )
+    server.speech_requests.clear()
+    await _speak(entity, instruct="cheerful and quick")
+    await _speak(entity)
+    assert [r["options"] for r in server.speech_requests] == [
+        {"seed": 3, "instruct": "cheerful and quick"},
+        {"seed": 3, "instruct": "a calm, low voice"},
+    ]
+
+
+async def test_call_options_through_tts_manager(hass: HomeAssistant, fake) -> None:
+    """Home Assistant's own option check, as tts.speak runs it, follows the model.
+
+    The manager refuses any option not in supported_options before the engine
+    is called ("Unsupported options" from 2026.11, "Invalid options found"
+    before).
+    """
+    _server, url = fake
+    entry = await _add_server(hass, url)
+    entity = await _tts_entity(
+        hass,
+        entry,
+        "kokoro",
+        {"name": "Kokoro", "languages": ["en"], "split_sentences": False},
+    )
+    tts.async_create_stream(
+        hass, entity.entity_id, language="en", options={"seed": "9"}
+    )
+    with pytest.raises(HomeAssistantError, match="instruct"):
+        tts.async_create_stream(
+            hass, entity.entity_id, language="en", options={"instruct": "calm"}
+        )
+
+
+async def test_call_options_types_and_errors(hass: HomeAssistant, fake) -> None:
+    """Call values are converted by the declared type and checked."""
+    server, url = fake
+    entry = await _add_server(hass, url)
+    entity = await _tts_entity(
+        hass,
+        entry,
+        "kitt-en",
+        {"name": "KITT", "languages": ["en"], "voice": "kitt_eng", "streaming": True},
+    )
+    server.speech_requests.clear()
+    await _speak(
+        entity,
+        temperature="0.5",
+        text_chunk_mode="tag_aware",
+        do_sample="false",
+        instruct="excited",
+        preferred_format="wav",
+    )
+    (request,) = server.speech_requests
+    assert request["options"] == {
+        "temperature": 0.5,
+        "text_chunk_mode": "tag_aware",
+        "do_sample": False,
+        "instruct": "excited",
+    }
+
+    for options, message in [
+        ({"seed": "abc"}, "`seed` must be a whole number"),
+        ({"seed": -1}, "`seed` must be at least 0"),
+        ({"temperature": "warm"}, "`temperature` must be a number"),
+        (
+            {"text_chunk_mode": "bogus"},
+            "`text_chunk_mode` must be one of word_budget, tag_aware",
+        ),
+        ({"do_sample": "maybe"}, "`do_sample` must be true or false"),
+    ]:
+        server.speech_requests.clear()
+        with pytest.raises(ServiceValidationError, match=message):
+            await _speak(entity, **options)
+        assert not server.speech_requests  # refused before anything is sent
+
+
+async def test_call_options_refused(hass: HomeAssistant, fake) -> None:
+    """Path options and the ones the engine manages are refused."""
+    server, url = fake
+    entry = await _add_server(hass, url)
+    kokoro = await _tts_entity(
+        hass,
+        entry,
+        "kokoro",
+        {"name": "Kokoro", "languages": ["en"], "split_sentences": False},
+    )
+    server.speech_requests.clear()  # the probe made when the engine was added
+    with pytest.raises(
+        ServiceValidationError, match="`source_audio` names a file on the server"
+    ):
+        await _speak(kokoro, source_audio="/etc/passwd")
+    with pytest.raises(
+        ServiceValidationError, match="`speed` cannot be set per call; set the speed"
+    ):
+        await _speak(kokoro, speed=1.5)
+    assert not server.speech_requests
+
+
+async def test_call_options_old_server(hass: HomeAssistant, fake) -> None:
+    """A server without declared options accepts only the voice."""
+    server, url = fake
+    server.params = None  # before audio.cpp v0.9.1: no declared options
+    entry = await _add_server(hass, url)
+    entity = await _tts_entity(
+        hass,
+        entry,
+        "kokoro",
+        {"name": "Kokoro", "languages": ["en"], "split_sentences": False},
+    )
+    assert entity.supported_options == ["voice"]
+    await _speak(entity, voice="alba")
+    assert server.speech_requests[-1]["voice"] == "alba"
 
 
 async def test_speed_field_follows_model(hass: HomeAssistant, fake) -> None:

@@ -46,9 +46,11 @@ PARAMS = {
             "values": ["word_budget", "tag_aware"],
         },
         {"name": "instruct", "type": "string"},
+        {"name": "do_sample", "type": "bool"},
     ],
     "kokoro": [
         {"name": "seed", "type": "int", "min": 0},
+        {"name": "source_audio", "type": "audio_path"},
         {"name": "speed", "type": "float", "default": 1, "min": 0.5, "max": 2.0},
     ],
     "chatterbox-italian": [

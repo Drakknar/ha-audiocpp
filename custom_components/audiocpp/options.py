@@ -9,6 +9,7 @@ saved or set up, instead of when Assist next speaks.
 
 from collections.abc import Mapping
 import difflib
+import math
 from typing import Any
 
 from .api import RESERVED_SPEECH_KEYS, ModelInfo, ModelParam
@@ -136,3 +137,92 @@ def check_speech_options(
                 f"{model.id}{_suggest(key, model)}"
             )
     return [problem for problem in problems if problem]
+
+
+# Spec types that name a file on the server. A caller must not point the
+# server at arbitrary files, so these cannot be set per call.
+_PATH_TYPES = frozenset({"path", "audio_path", "path_list"})
+# Declared options the integration sets itself, with where to set them instead.
+_MANAGED = {
+    "speed": "set the speed in the engine's settings",
+    "speaking_rate": "set the speed in the engine's settings",
+    "language": "use the language of the action call",
+}
+_TRUE = frozenset({"true", "on", "yes", "1"})
+_FALSE = frozenset({"false", "off", "no", "0"})
+
+
+def call_option_names(model: ModelInfo) -> list[str]:
+    """Return the declared options a ``tts.speak`` call may name.
+
+    This includes the ones that are refused, so that a call naming one gets
+    the reason from :func:`call_options` instead of Home Assistant's generic
+    "invalid options" error.
+    """
+    return [param.name for param in model.params or ()]
+
+
+def _blocked(param: ModelParam) -> str | None:
+    if param.type in _PATH_TYPES:
+        return "names a file on the server and cannot be set per call"
+    if param.name in _MANAGED:
+        return f"cannot be set per call; {_MANAGED[param.name]}"
+    return None
+
+
+def _coerce(value: Any, param: ModelParam) -> Any:
+    """Convert a call's value to the option's declared type, or raise ValueError."""
+    name = param.name
+    if param.type == "int":
+        if isinstance(value, bool):
+            raise ValueError(f"`{name}` must be a whole number")
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        try:
+            return int(value)
+        except TypeError, ValueError:
+            raise ValueError(f"`{name}` must be a whole number") from None
+    if param.type == "float":
+        if isinstance(value, bool):
+            raise ValueError(f"`{name}` must be a number")
+        try:
+            number = float(value)
+        except TypeError, ValueError:
+            raise ValueError(f"`{name}` must be a number") from None
+        if not math.isfinite(number):
+            raise ValueError(f"`{name}` must be a number")
+        return number
+    if param.type == "bool":
+        if isinstance(value, bool):
+            return value
+        if str(value).lower() in _TRUE:
+            return True
+        if str(value).lower() in _FALSE:
+            return False
+        raise ValueError(f"`{name}` must be true or false")
+    if param.type in ("string", "enum"):
+        return str(value)
+    raise ValueError(
+        f"`{name}` ({param.type or 'unknown type'}) cannot be set per call"
+    )
+
+
+def call_options(model: ModelInfo, options: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the model options a ``tts.speak`` call sets, converted and checked.
+
+    Keys that are not options the model declares (``voice``, Home Assistant's
+    ``preferred_*``) are not this function's business and are skipped. An empty
+    value is skipped too, so a script can leave a field unset. Raises
+    ValueError with a message for the caller on a refused or invalid value.
+    """
+    chosen: dict[str, Any] = {}
+    for name, value in options.items():
+        if (param := model.param(name)) is None or value is None or value == "":
+            continue
+        if reason := _blocked(param):
+            raise ValueError(f"`{name}` {reason}")
+        value = _coerce(value, param)
+        if problem := _check_value(name, value, param):
+            raise ValueError(problem)
+        chosen[name] = value
+    return chosen
