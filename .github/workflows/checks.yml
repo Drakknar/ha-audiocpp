@@ -33,7 +33,7 @@ jobs:
       # unrelated project). mutagen and ha-ffmpeg: needed by the tts and stt platforms.
       - name: Install the test harness
         run: |
-          ha=$(jq -r .homeassistant hacs.json)
+          ha=$(jq -er .homeassistant hacs.json)
           uv venv -p 3.14 "$RUNNER_TEMP/venv"
           VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "homeassistant==$ha" "pytest-homeassistant==$ha" mutagen ha-ffmpeg
 

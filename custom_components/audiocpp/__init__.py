@@ -42,7 +42,7 @@ BUSY_RETRY_AFTER = 60
 type AudioCppConfigEntry = ConfigEntry[AudioCppClient]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: AudioCppConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: AudioCppConfigEntry) -> None:
     """Set up an audio.cpp server from a config entry."""
     client = AudioCppClient(
         async_get_clientsession(hass),
@@ -64,7 +64,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: AudioCppConfigEntry) -> 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # Adding, changing or removing an engine (subentry) fires this listener.
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-    return True
 
 
 async def _async_check_engine_options(
@@ -137,6 +136,6 @@ async def _async_update_listener(
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: AudioCppConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: AudioCppConfigEntry) -> None:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    await hass.config_entries.async_unload_platforms_or_raise(entry, PLATFORMS)
