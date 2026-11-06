@@ -139,3 +139,15 @@ async def _async_update_listener(
 async def async_unload_entry(hass: HomeAssistant, entry: AudioCppConfigEntry) -> None:
     """Unload a config entry."""
     await hass.config_entries.async_unload_platforms_or_raise(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: AudioCppConfigEntry) -> None:
+    """Remove repair issues raised before 0.4.0, which aren't linked to the entry.
+
+    Setup removes them too, but an entry removed without ever loading under
+    0.4.0 would leave them behind. Can go after a couple of releases.
+    """
+    prefix = f"engine_options_{entry.entry_id}_"
+    # A refresh that keeps nothing deletes every issue it matched.
+    with ir.async_refresh_issues(hass, DOMAIN, issue_id_pattern=re.escape(prefix)):
+        pass
