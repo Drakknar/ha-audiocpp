@@ -51,6 +51,12 @@ PARAMS = {
     "kokoro": [
         {"name": "seed", "type": "int", "min": 0},
         {"name": "source_audio", "type": "audio_path"},
+        # A file option declared as plain text, as moss_ttsd and vibevoice do.
+        {
+            "name": "voice_samples",
+            "type": "string",
+            "description": "Comma-separated reference WAV paths",
+        },
         {"name": "speed", "type": "float", "default": 1, "min": 0.5, "max": 2.0},
     ],
     "chatterbox-italian": [

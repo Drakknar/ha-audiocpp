@@ -28,6 +28,8 @@ CONF_EXTRA_OPTIONS: Final = "extra_options"
 # model declares for it (``instruct`` or ``instruction``).
 CONF_INSTRUCTION: Final = "instruction"
 CONF_INSTRUCTION_OPTION: Final = "instruction_option"
+# Model options a tts.speak call may set (an allow-list the owner picks).
+CONF_CALL_OPTIONS: Final = "call_options"
 CONF_SAMPLE_RATE: Final = "sample_rate"
 CONF_CHANNELS: Final = "channels"
 CONF_LANGUAGE_HINT: Final = "language_hint"

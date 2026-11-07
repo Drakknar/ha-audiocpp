@@ -55,6 +55,7 @@ from .api import (
     normalize_url,
 )
 from .const import (
+    CONF_CALL_OPTIONS,
     CONF_CHANNELS,
     CONF_EXTRA_OPTIONS,
     CONF_INSTRUCTION,
@@ -77,7 +78,7 @@ from .const import (
     TASK_CLONE,
     TASK_TTS,
 )
-from .options import check_speech_options, speech_extra
+from .options import call_option_choices, check_speech_options, speech_extra
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -434,6 +435,8 @@ class TTSSubentryFlow(_EngineSubentryFlow):
                 data[CONF_INSTRUCTION_OPTION] = option
             else:
                 data.pop(CONF_INSTRUCTION, None)
+            if not data.get(CONF_CALL_OPTIONS):
+                data.pop(CONF_CALL_OPTIONS, None)
             extra = data.get(CONF_EXTRA_OPTIONS)
             checked = (data.get(CONF_SPEED), extra)
             if error := self._check_languages(data[CONF_LANGUAGES]):
@@ -522,8 +525,35 @@ class TTSSubentryFlow(_EngineSubentryFlow):
             fields[probatio.Optional(CONF_INSTRUCTION)] = TextSelector(
                 TextSelectorConfig(multiline=True)
             )
+        if choices := self._call_option_choices():
+            fields[probatio.Optional(CONF_CALL_OPTIONS)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=choices,
+                    multiple=True,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
         fields[probatio.Optional(CONF_EXTRA_OPTIONS)] = ObjectSelector()
         return probatio.Schema(fields)
+
+    def _call_option_choices(self) -> list[SelectOptionDict]:
+        """Return the options the owner may let ``tts.speak`` calls set.
+
+        Only the model's plain-valued options (see ``call_option_choices``);
+        none for a server that does not describe them.
+        """
+        model = self._model
+        if model is None:
+            return []
+        return [
+            SelectOptionDict(
+                value=param.name,
+                label=f"{param.name}: {param.description}"
+                if param.description
+                else param.name,
+            )
+            for param in call_option_choices(model)
+        ]
 
     @property
     def _instruction_option(self) -> str | None:

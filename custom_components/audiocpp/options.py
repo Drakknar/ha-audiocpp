@@ -7,7 +7,7 @@ option renamed by a server upgrade (v0.9.2 renamed many) when the engine is
 saved or set up, instead of when Assist next speaks.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 import difflib
 import math
 from typing import Any
@@ -139,9 +139,9 @@ def check_speech_options(
     return [problem for problem in problems if problem]
 
 
-# Spec types that name a file on the server. A caller must not point the
-# server at arbitrary files, so these cannot be set per call.
-_PATH_TYPES = frozenset({"path", "audio_path", "path_list"})
+# Spec types a call may set: plain values. Path types (``path``,
+# ``audio_path``, ``path_list``, ...) and lists are never offered.
+_SCALAR_TYPES = frozenset({"int", "float", "bool", "string", "enum"})
 # Declared options the integration sets itself, with where to set them instead.
 _MANAGED = {
     "speed": "set the speed in the engine's settings",
@@ -152,22 +152,30 @@ _TRUE = frozenset({"true", "on", "yes", "1"})
 _FALSE = frozenset({"false", "off", "no", "0"})
 
 
-def call_option_names(model: ModelInfo) -> list[str]:
-    """Return the declared options a ``tts.speak`` call may name.
+def call_option_choices(model: ModelInfo) -> list[ModelParam]:
+    """Return the declared options an engine may let ``tts.speak`` calls set.
 
-    This includes the ones that are refused, so that a call naming one gets
-    the reason from :func:`call_options` instead of Home Assistant's generic
-    "invalid options" error.
+    Only plain-valued options the integration does not manage itself. The
+    owner still picks which of them calls may set (``CONF_CALL_OPTIONS``):
+    the spec's type does not say whether a ``string`` option names a file on
+    the server (``voice_samples``, ``previous_takes_file``, JSON with an
+    ``audio_path``), so nothing is allowed by default.
     """
-    return [param.name for param in model.params or ()]
+    return [
+        param
+        for param in model.params or ()
+        if param.type in _SCALAR_TYPES and param.name not in _MANAGED
+    ]
 
 
-def _blocked(param: ModelParam) -> str | None:
-    if param.type in _PATH_TYPES:
-        return "names a file on the server and cannot be set per call"
-    if param.name in _MANAGED:
-        return f"cannot be set per call; {_MANAGED[param.name]}"
-    return None
+def call_option_names(model: ModelInfo, allowed: Collection[str]) -> list[str]:
+    """Return the options a ``tts.speak`` call may name, in the model's order.
+
+    These are the engine's allowed options that the model still declares
+    with a plain type. Home Assistant refuses any other option before the
+    engine is called.
+    """
+    return [param.name for param in call_option_choices(model) if param.name in allowed]
 
 
 def _coerce(value: Any, param: ModelParam) -> Any:
@@ -200,27 +208,30 @@ def _coerce(value: Any, param: ModelParam) -> Any:
         if str(value).lower() in _FALSE:
             return False
         raise ValueError(f"`{name}` must be true or false")
-    if param.type in ("string", "enum"):
-        return str(value)
-    raise ValueError(
-        f"`{name}` ({param.type or 'unknown type'}) cannot be set per call"
-    )
+    return str(value)
 
 
-def call_options(model: ModelInfo, options: Mapping[str, Any]) -> dict[str, Any]:
+def call_options(
+    model: ModelInfo, options: Mapping[str, Any], allowed: Collection[str]
+) -> dict[str, Any]:
     """Return the model options a ``tts.speak`` call sets, converted and checked.
 
-    Keys that are not options the model declares (``voice``, Home Assistant's
-    ``preferred_*``) are not this function's business and are skipped. An empty
-    value is skipped too, so a script can leave a field unset. Raises
-    ValueError with a message for the caller on a refused or invalid value.
+    Only the options :func:`call_option_names` returns are taken; other keys
+    (``voice``, Home Assistant's ``preferred_*``) are not this function's
+    business and are skipped. An empty value is skipped too, so a script can
+    leave a field unset. Raises ValueError with a message for the caller on
+    an invalid value.
     """
+    names = set(call_option_names(model, allowed))
     chosen: dict[str, Any] = {}
     for name, value in options.items():
-        if (param := model.param(name)) is None or value is None or value == "":
+        if (
+            name not in names
+            or (param := model.param(name)) is None
+            or value is None
+            or value == ""
+        ):
             continue
-        if reason := _blocked(param):
-            raise ValueError(f"`{name}` {reason}")
         value = _coerce(value, param)
         if problem := _check_value(name, value, param):
             raise ValueError(problem)

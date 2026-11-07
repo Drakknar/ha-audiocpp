@@ -21,6 +21,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .api import AudioCppError, ModelInfo, PcmFormat, build_wav, wav_header
 from .const import (
+    CONF_CALL_OPTIONS,
     CONF_CHANNELS,
     CONF_LANGUAGES,
     CONF_SAMPLE_RATE,
@@ -123,6 +124,10 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
         self._attr_default_options = {ATTR_VOICE: self._voice} if self._voice else None
         self._voices: list[Voice] = []
         self._model_info: ModelInfo | None = None
+        # Model options the owner lets tts.speak calls set; none by default.
+        self._call_allowed: frozenset[str] = frozenset(
+            data.get(CONF_CALL_OPTIONS) or ()
+        )
 
     @override
     async def async_added_to_hass(self) -> None:
@@ -142,12 +147,15 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
         )
 
     async def _async_load_options(self) -> None:
-        """Learn which options the model declares, so a call can set them.
+        """Learn which allowed options the model declares, so a call can set them.
 
         Home Assistant checks a call's options against ``supported_options``
-        when it runs, so the list grows once this has loaded. A server before
-        audio.cpp v0.9.1 declares none: only ``voice`` is then accepted.
+        when it runs, so the list grows once this has loaded. With no allowed
+        options, or a server before audio.cpp v0.9.1 (which declares none),
+        only ``voice`` is accepted.
         """
+        if not self._call_allowed:
+            return
         try:
             models = await self.client.models()
         except AudioCppError as err:
@@ -157,7 +165,10 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
         if model is None or model.params is None:
             return
         self._model_info = model
-        self._attr_supported_options = [ATTR_VOICE, *call_option_names(model)]
+        self._attr_supported_options = [
+            ATTR_VOICE,
+            *call_option_names(model, self._call_allowed),
+        ]
 
     async def _async_load_voices(self) -> None:
         try:
@@ -183,7 +194,7 @@ class AudioCppTTSEntity(TextToSpeechEntity, AudioCppEntity):
         if self._model_info is None:
             return self._extra
         try:
-            per_call = call_options(self._model_info, options)
+            per_call = call_options(self._model_info, options, self._call_allowed)
         except ValueError as err:
             raise ServiceValidationError(f"audio.cpp {self.model}: {err}") from err
         if not per_call:

@@ -86,6 +86,7 @@
             "split_sentences": "Synthesize sentence by sentence",
             "speed": "Speed",
             "instruction": "Instruction",
+            "call_options": "Options a call may set",
             "extra_options": "Extra request options"
           },
           "data_description": {
@@ -95,6 +96,7 @@
             "split_sentences": "Start speaking after the first sentence instead of waiting for the whole reply. Turn off if the model sounds better with the full text.",
             "speed": "Speech rate multiplier. Only shown for models with speed control, within the range the model declares. Servers before audio.cpp v0.9.1 do not say, so it is always shown there and the test synthesis tells you if the model rejects it.",
             "instruction": "How the model should speak, for example \"a calm, low male voice\". Only shown for models that take an instruction (such as Qwen3-TTS or VoxCPM2 voice design).",
+            "call_options": "Model options that scripts, automations and API callers may set per tts.speak call, in the action's options next to voice (for example seed, temperature or instruct). Only options with plain values are listed. Leave empty to allow only the voice. Don't pick an option that names a file on the server: audio.cpp declares some file options as plain text, and a caller could then point the server at any file it can read.",
             "extra_options": "Extra fields merged into every speech request, for example seed, max_tokens or an options object with model options. model, input and the format fields are set by the integration. Keys the model does not declare are flagged before the test synthesis. Settings that belong to one voice can also live in its preset in the server's server.json (audio.cpp v0.9.2 and later)."
           }
         }
