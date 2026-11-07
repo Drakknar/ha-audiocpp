@@ -528,6 +528,17 @@ async def _tts_entity(hass, entry, model: str, settings: dict):
     return _entity(hass, tts.DATA_COMPONENT, "tts", _subentry(entry, "tts").subentry_id)
 
 
+async def _store_call_options(hass, entry, names: list[str]):
+    """Store an allow-list the form would refuse, reload, return the new entity."""
+    subentry = _subentry(entry, "tts")
+    hass.config_entries.async_update_subentry(
+        entry, subentry, data={**subentry.data, "call_options": names}
+    )
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    return _entity(hass, tts.DATA_COMPONENT, "tts", subentry.subentry_id)
+
+
 async def _speak(entity, **options) -> bytes:
     response = await entity.async_stream_tts_audio(
         TTSAudioRequest(
@@ -636,10 +647,12 @@ async def test_call_options_through_tts_manager(hass: HomeAssistant, fake) -> No
             "name": "Kokoro",
             "languages": ["en"],
             "split_sentences": False,
-            # A path option and a managed one cannot be allowed, even if stored.
-            "call_options": ["seed", "source_audio", "speed"],
+            "call_options": ["seed"],
         },
     )
+    # The form only offers plain options, but a stored list is filtered too:
+    # a path option and a managed one are never accepted.
+    entity = await _store_call_options(hass, entry, ["seed", "source_audio", "speed"])
     assert entity.supported_options == ["voice", "seed"]
     tts.async_create_stream(
         hass, entity.entity_id, language="en", options={"seed": "9"}
@@ -715,13 +728,10 @@ async def test_call_options_old_server(hass: HomeAssistant, fake) -> None:
         hass,
         entry,
         "kokoro",
-        {
-            "name": "Kokoro",
-            "languages": ["en"],
-            "split_sentences": False,
-            "call_options": ["seed"],
-        },
+        {"name": "Kokoro", "languages": ["en"], "split_sentences": False},
     )
+    # Such a server offers no field; even an allowed option is not accepted.
+    entity = await _store_call_options(hass, entry, ["seed"])
     assert entity.supported_options == ["voice"]
     await _speak(entity, voice="alba")
     assert server.speech_requests[-1]["voice"] == "alba"
