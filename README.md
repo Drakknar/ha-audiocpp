@@ -1,5 +1,7 @@
 # audio.cpp for Home Assistant
 
+<img src="assets/icon.svg" alt="" width="96" align="right">
+
 Use the text-to-speech and speech-recognition models of an [audio.cpp](https://github.com/0xShug0/audio.cpp) server (`audiocpp_server`) in Home Assistant and Assist.
 
 - **TTS engines** (`tts.*`) for any `tts` or voice-cloning model on the server, such as Pocket TTS, Kokoro, OmniVoice or Chatterbox.
